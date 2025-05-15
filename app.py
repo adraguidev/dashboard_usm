@@ -9,6 +9,7 @@ from openpyxl.utils import get_column_letter
 import plotly.figure_factory as ff
 from numpy import polyfit, arange
 import numpy as np
+import datetime
 
 # Configuración de la página
 st.set_page_config(
@@ -42,12 +43,13 @@ try:
     df = cargar_datos(archivos[proceso])
     
     # Crear pestañas para diferentes análisis
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Pendientes", 
         "Producción Diaria", 
         "Ingresos Diarios",
         "Tiempos de Asignación y Pretrabajo",
-        "Proyección de Cierre"
+        "Proyección de Cierre",
+        "Evolución Pendientes x Operador"
     ])
     
     with tab1:
@@ -149,6 +151,57 @@ try:
             file_name=f"pendientes_{proceso}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+        # --- Guardado automático del histórico de pendientes por operador y año ---
+        # Quitar la fila 'Total' para el histórico
+        tabla_historico = tabla.drop('Total', errors='ignore').copy()
+        # Quitar la columna 'Total' para el histórico
+        if 'Total' in tabla_historico.columns:
+            tabla_historico = tabla_historico.drop(columns=['Total'])
+        # Asegurar que 'OPERADOR' sea columna
+        if 'OPERADOR' not in tabla_historico.columns:
+            tabla_historico = tabla_historico.reset_index().rename(columns={tabla_historico.index.name or 'index': 'OPERADOR'})
+        # Convertir a formato largo
+        tabla_historico = tabla_historico.melt(
+            id_vars=['OPERADOR'],
+            var_name='Año',
+            value_name='Pendientes'
+        )
+        # Agregar columnas de fecha y proceso
+        tabla_historico['Fecha'] = datetime.date.today().strftime('%Y-%m-%d')
+        tabla_historico['Proceso'] = proceso
+        # Reordenar columnas
+        tabla_historico = tabla_historico[['Fecha', 'Proceso', 'OPERADOR', 'Año', 'Pendientes']]
+        # Normalizar claves para evitar duplicados por diferencias de formato
+        tabla_historico['OPERADOR'] = tabla_historico['OPERADOR'].str.strip().str.upper()
+        tabla_historico['Año'] = tabla_historico['Año'].astype(str)
+        # Ruta del archivo histórico
+        ruta_historico = 'ARCHIVOS/historico_pendientes_operador.csv'
+        # Leer histórico existente si existe
+        try:
+            historico_existente = pd.read_csv(ruta_historico, dtype=str)
+            historico_existente['OPERADOR'] = historico_existente['OPERADOR'].str.strip().str.upper()
+            historico_existente['Año'] = historico_existente['Año'].astype(str)
+        except FileNotFoundError:
+            historico_existente = pd.DataFrame(columns=tabla_historico.columns)
+
+        # Merge anti-join para obtener solo los registros nuevos
+        claves = ['Fecha', 'Proceso', 'OPERADOR', 'Año']
+        if not historico_existente.empty:
+            merge = tabla_historico.merge(
+                historico_existente[claves],
+                on=claves,
+                how='left',
+                indicator=True
+            )
+            tabla_historico_filtrada = merge[merge['_merge'] == 'left_only'].drop(columns=['_merge'])
+            historico_actualizado = pd.concat([historico_existente, tabla_historico_filtrada], ignore_index=True)
+        else:
+            tabla_historico_filtrada = tabla_historico.copy()
+            historico_actualizado = tabla_historico.copy()
+
+        if not tabla_historico_filtrada.empty:
+            historico_actualizado.to_csv(ruta_historico, index=False)
 
     with tab2:
         st.header("Producción Diaria")
@@ -805,6 +858,282 @@ try:
         - Si la curva de pendientes baja a cero, se estima en cuántos días se cerrarían todos los pendientes.
         - Si la curva se estabiliza, se estaría llegando al punto de equilibrio.
         """)
+
+    # --- Nueva pestaña: Evolución Pendientes x Operador ---
+    with tab6:
+        st.header("Evolución de Pendientes por Operador")
+        def cargar_historico():
+            ruta_historico = 'ARCHIVOS/historico_pendientes_operador.csv'
+            try:
+                return pd.read_csv(ruta_historico, dtype={'Año': str})
+            except FileNotFoundError:
+                return pd.DataFrame(columns=['Fecha', 'Proceso', 'OPERADOR', 'Año', 'Pendientes'])
+        recargar = st.button("Recargar solo histórico")
+        historico = cargar_historico()
+        # Agrupar años menores a 2024 como 'ANTIGUOS' para el filtro
+        historico['Año'] = historico['Año'].apply(lambda x: 'ANTIGUOS' if (x.isdigit() and int(x) < 2024) or x == 'ANTIGUOS' else x)
+        # Filtros
+        # Solo mostrar el proceso seleccionado en el sidebar
+        proceso_sel = proceso
+        anios_disp = historico[historico['Proceso'] == proceso_sel]['Año'].unique().tolist()
+        anios_disp = sorted(set(anios_disp), reverse=True, key=lambda x: (x != 'ANTIGUOS', x))
+        anios_sel = st.multiselect("Año(s)", options=['Todos'] + anios_disp, default=anios_disp[:1] if anios_disp else [])
+        if 'Todos' in anios_sel or not anios_sel:
+            # Mostrar solo fechas que existen en todos los años
+            anios_validos = [a for a in anios_disp if a != 'Todos']
+            fechas_por_anio = [set(historico[(historico['Proceso'] == proceso_sel) & (historico['Año'] == anio)]['Fecha'].unique()) for anio in anios_validos]
+            if fechas_por_anio:
+                fechas_comunes = set.intersection(*fechas_por_anio)
+            else:
+                fechas_comunes = set()
+            df_filtro = historico[(historico['Proceso'] == proceso_sel) & (historico['Fecha'].isin(fechas_comunes))].copy()
+        elif len(anios_sel) > 1:
+            # Mostrar solo fechas que existen en todos los años seleccionados
+            fechas_por_anio = [set(historico[(historico['Proceso'] == proceso_sel) & (historico['Año'] == anio)]['Fecha'].unique()) for anio in anios_sel]
+            if fechas_por_anio:
+                fechas_comunes = set.intersection(*fechas_por_anio)
+            else:
+                fechas_comunes = set()
+            df_filtro = historico[(historico['Proceso'] == proceso_sel) & (historico['Año'].isin(anios_sel)) & (historico['Fecha'].isin(fechas_comunes))].copy()
+        else:
+            df_filtro = historico[(historico['Proceso'] == proceso_sel) & (historico['Año'].isin(anios_sel))].copy()
+        # Pivotear: filas=OPERADOR, columnas=Fecha, valores=Pendientes
+        tabla_matriz = df_filtro.pivot_table(
+            index='OPERADOR',
+            columns='Fecha',
+            values='Pendientes',
+            aggfunc='sum',
+            fill_value=0
+        )
+        # Ordenar columnas por fecha
+        tabla_matriz = tabla_matriz.reindex(sorted(tabla_matriz.columns), axis=1)
+        # Ordenar filas de mayor a menor según la última fecha disponible
+        if len(tabla_matriz.columns) > 0:
+            ultima_fecha = tabla_matriz.columns[-1]
+            tabla_matriz = tabla_matriz.sort_values(by=ultima_fecha, ascending=False)
+        # Agregar fila TOTAL
+        total_row = tabla_matriz.sum(axis=0)
+        total_row.name = 'TOTAL'
+        tabla_matriz = pd.concat([tabla_matriz, pd.DataFrame([total_row])])
+        st.dataframe(tabla_matriz, use_container_width=True, height=500)
+        # Botón para descargar Excel
+        def to_excel_matriz(tabla):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                tabla.to_excel(writer, sheet_name='EvolucionPendientes')
+            output.seek(0)
+            return output
+        excel_data_matriz = to_excel_matriz(tabla_matriz)
+        st.download_button(
+            label="Descargar matriz en Excel",
+            data=excel_data_matriz,
+            file_name=f"evolucion_pendientes_{proceso_sel}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        # Gráfico de totales por fecha
+        st.subheader("Evolución de los totales de pendientes")
+        totales = total_row.drop('TOTAL', errors='ignore')
+        totales = totales.astype(int)
+        fig_totales = go.Figure()
+        # Línea principal con etiquetas
+        fig_totales.add_trace(go.Scatter(
+            x=totales.index,
+            y=totales.values,
+            mode='lines+markers+text',
+            name='Total de pendientes',
+            text=[str(v) for v in totales.values],
+            textposition="top center"
+        ))
+        # Línea de tendencia sobre los últimos 7 días
+        if len(totales) >= 2:
+            ultimos_7 = totales[-7:]
+            x_numeric = list(range(len(ultimos_7)))
+            y = ultimos_7.values
+            if len(x_numeric) > 1:
+                z = np.polyfit(x_numeric, y, 1)
+                tendencia = z[0] * np.array(x_numeric) + z[1]
+                fig_totales.add_trace(go.Scatter(
+                    x=ultimos_7.index,
+                    y=tendencia,
+                    mode='lines',
+                    name='Tendencia (últimos 7 días)',
+                    line=dict(dash='dash', color='orange')
+                ))
+        fig_totales.update_layout(
+            title='Total de pendientes por fecha',
+            xaxis_title='Fecha',
+            yaxis_title='Total de pendientes',
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig_totales, use_container_width=True)
+
+        # --- Ranking de evolución de pendientes por operador ---
+        st.subheader("Ranking de evolución de pendientes por operador")
+        # Selector de periodo
+        opciones_periodo = [7, 15, 30, 'Todo el periodo']
+        periodo_sel = st.selectbox("Periodo de análisis (días)", opciones_periodo, index=1)
+        
+        # Solo operadores (sin TOTAL)
+        tabla_operadores = tabla_matriz.drop('TOTAL', errors='ignore')
+        
+        # Definir siempre tabla_operadores_periodo
+        if len(tabla_operadores.columns) > 0:
+            if periodo_sel == 'Todo el periodo':
+                cols_periodo = tabla_operadores.columns
+            else:
+                cols_periodo = tabla_operadores.columns[-periodo_sel:]
+            
+            # Asegurarnos que OPERADOR sea una columna
+            tabla_operadores = tabla_operadores.reset_index()
+            if tabla_operadores.columns[0] != 'OPERADOR':
+                tabla_operadores = tabla_operadores.rename(columns={tabla_operadores.columns[0]: 'OPERADOR'})
+            
+            tabla_operadores_periodo = tabla_operadores[['OPERADOR'] + cols_periodo.tolist()]
+            tabla_operadores_filtrada = tabla_operadores_periodo[tabla_operadores_periodo[cols_periodo[-1]] >= 5]
+            
+            # Realizar el melt con la estructura correcta
+            pendientes_long = tabla_operadores_filtrada.melt(
+                id_vars=['OPERADOR'],
+                value_vars=cols_periodo,
+                var_name='Fecha',
+                value_name='Pendientes'
+            )
+            
+            # Normalizar operador y fecha
+            pendientes_long['OPERADOR_NORM'] = pendientes_long['OPERADOR'].str.strip().str.upper()
+            pendientes_long['Fecha'] = pd.to_datetime(pendientes_long['Fecha'], errors='coerce').dt.strftime('%Y-%m-%d')
+            
+            # Obtener datos de producción diaria
+            col_operador = 'OperadorPre'
+            col_fecha = 'FechaPre'
+            col_tramite = 'NumeroTramite'
+            
+            if col_operador not in df.columns:
+                col_operador = 'OPERADOR'
+            if col_fecha not in df.columns:
+                col_fecha = 'FechaPre'
+            
+            # Convertir fechas a datetime si no lo son
+            if not pd.api.types.is_datetime64_any_dtype(df[col_fecha]):
+                df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
+            
+            # Filtrar por el periodo seleccionado
+            fecha_min = pd.to_datetime(cols_periodo[0])
+            fecha_max = pd.to_datetime(cols_periodo[-1])
+            df_prod = df[(df[col_fecha] >= fecha_min) & (df[col_fecha] <= fecha_max)]
+            
+            # Calcular producción diaria por operador SOLO para el periodo seleccionado
+            fechas_periodo = set([str(f) for f in cols_periodo])
+            prod_diaria = df_prod.groupby([col_operador, col_fecha])[col_tramite].count().reset_index()
+            prod_diaria[col_operador] = prod_diaria[col_operador].str.strip().str.upper()
+            prod_diaria[col_fecha] = prod_diaria[col_fecha].dt.strftime('%Y-%m-%d')
+            # Filtrar solo fechas del periodo seleccionado
+            prod_diaria = prod_diaria[prod_diaria[col_fecha].isin(fechas_periodo)]
+            # Calcular producción promedio y días de producción solo en el periodo
+            prod_promedio = prod_diaria.groupby(col_operador)[col_tramite].agg(['mean', 'count']).reset_index()
+            prod_promedio.columns = [col_operador, 'Produccion_Promedio', 'Dias_Produccion']
+            prod_promedio[col_operador] = prod_promedio[col_operador].str.strip().str.upper()
+            
+            # Calcular métricas de evolución
+            if len(pendientes_long) > 0:
+                # Agrupar por operador y calcular métricas de pendientes
+                evolucion = pendientes_long.groupby('OPERADOR_NORM').agg({
+                    'Pendientes': ['first', 'last', 'count']
+                }).reset_index()
+                
+                evolucion.columns = ['OPERADOR_NORM', 'Pendientes_Inicial', 'Pendientes_Final', 'Dias']
+                evolucion['Cambio'] = evolucion['Pendientes_Final'] - evolucion['Pendientes_Inicial']
+                
+                # Corregir cálculo de Cambio_Porcentual para evitar inf
+                evolucion['Cambio_Porcentual'] = evolucion.apply(
+                    lambda row: (
+                        (row['Cambio'] / row['Pendientes_Inicial'] * 100)
+                        if row['Pendientes_Inicial'] != 0
+                        else (np.sign(row['Cambio']) * 100.0 if row['Cambio'] != 0 else 0.0)
+                    ),
+                    axis=1
+                ).round(1)
+                
+                evolucion['Tendencia_Diaria'] = (evolucion['Cambio'] / evolucion['Dias']).round(2)
+                
+                # Unir métricas de pendientes con producción
+                evolucion = evolucion.merge(
+                    prod_promedio,
+                    left_on='OPERADOR_NORM',
+                    right_on=col_operador,
+                    how='left'
+                ).drop(columns=[col_operador])
+                
+                # Calcular eficiencia (pendientes vs producción) con lógica mejorada y resaltado
+                def calcular_eficiencia_v2(row):
+                    eficiencia_real = row['Produccion_Promedio'] - row['Tendencia_Diaria'] # Cuánto reduce neto
+                    produccion_promedio_minima_alta = 5
+                    produccion_promedio_minima_media = 3
+                    aumento_peligroso_pendientes = 1
+
+                    if eficiencia_real > 0 and row['Produccion_Promedio'] >= produccion_promedio_minima_alta:
+                        return 'Muy Alta'
+                    elif eficiencia_real > 0 and row['Produccion_Promedio'] >= produccion_promedio_minima_media:
+                        return 'Alta'
+                    elif eficiencia_real > 0: # Producción baja pero reduce neto
+                        return 'Mejorando'
+                    elif eficiencia_real == 0 and row['Produccion_Promedio'] > 0: # Se mantiene, pero produce
+                        return 'Estable'
+                    # Casos donde los pendientes aumentan (eficiencia_real <= 0)
+                    # Si la tendencia diaria es de aumento peligroso y la producción no la cubre
+                    elif row['Tendencia_Diaria'] > aumento_peligroso_pendientes and row['Produccion_Promedio'] < row['Tendencia_Diaria']:
+                        return 'En Observación' # ESTOS SE MARCARÁN EN ROJO
+                    elif eficiencia_real < 0 and row['Produccion_Promedio'] > 0 and row['Produccion_Promedio'] > abs(row['Tendencia_Diaria']):
+                        # Este caso es teóricamente cubierto por los primeros if, pero se deja por si acaso.
+                        # Si produce más que el aumento absoluto de pendientes, pero el neto es negativo (implicaría que Tendencia_Diaria es negativa, contradicción)
+                        # Lo reinterpreto: produce, pero no lo suficiente para que el neto sea positivo, pero sí más que el aumento absoluto de pendientes.
+                        # Esto podría ser 'Conteniendo' si Tendencia_Diaria es positiva.
+                        return 'Conteniendo'
+                    elif eficiencia_real < 0 and row['Produccion_Promedio'] > 0:
+                        return 'Conteniendo' # Produce, pero no lo suficiente para bajar pendientes netos.
+                    else: # No produce o produce muy poco y los pendientes aumentan o no bajan.
+                        return 'Baja'
+
+                evolucion['Eficiencia'] = evolucion.apply(calcular_eficiencia_v2, axis=1)
+                
+                # Ordenar por tendencia diaria y luego por eficiencia para visualización
+                # evolucion = evolucion.sort_values(by=['Tendencia_Diaria', 'Eficiencia'], ascending=[False, True])
+
+                # Mostrar ranking con formato condicional
+                def resaltar_criticos(row):
+                    color = 'red' if row['Eficiencia'] == 'En Observación' else ''
+                    return [f'background-color: {color}'] * len(row)
+
+                st.dataframe(evolucion.style.apply(resaltar_criticos, axis=1), use_container_width=True)
+                
+                # Gráfico de dispersión
+                fig_scatter = px.scatter(
+                    evolucion,
+                    x='Produccion_Promedio',
+                    y='Tendencia_Diaria',
+                    hover_name='OPERADOR_NORM',
+                    color='Eficiencia',
+                    size='Pendientes_Final',
+                    title='Tendencia vs Producción Promedio',
+                    labels={
+                        'Produccion_Promedio': 'Producción Diaria Promedio',
+                        'Tendencia_Diaria': 'Tendencia Diaria (pendientes/día)'
+                    }
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                # Mostrar resumen por estado
+                st.subheader("Resumen por Estado")
+                resumen_estado = evolucion.groupby('Eficiencia').agg({
+                    'OPERADOR_NORM': 'count',
+                    'Pendientes_Final': 'sum',
+                    'Produccion_Promedio': 'mean'
+                }).round(2)
+                st.dataframe(resumen_estado, use_container_width=True)
+            else:
+                st.warning("No hay datos suficientes para mostrar el ranking.")
+        else:
+            st.warning("No hay datos disponibles para el periodo seleccionado.")
 
 except Exception as e:
     st.error(f"Error al cargar los datos: {str(e)}") 
