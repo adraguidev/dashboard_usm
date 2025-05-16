@@ -16,7 +16,13 @@ import pytz
 st.set_page_config(
     page_title="Dashboard de Procesos",
     page_icon="📊",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://www.example.com/help',
+        'Report a bug': "https://www.example.com/bug",
+        'About': "# Dashboard de Análisis de Procesos. Creado con Streamlit."
+    }
 )
 
 # Título principal
@@ -44,11 +50,10 @@ try:
     df = cargar_datos(archivos[proceso])
     
     # Crear pestañas para diferentes análisis
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab5, tab6 = st.tabs([
         "Pendientes", 
         "Producción Diaria", 
         "Ingresos Diarios",
-        "Tiempos de Asignación y Pretrabajo",
         "Proyección de Cierre",
         "Evolución Pendientes x Operador"
     ])
@@ -541,9 +546,9 @@ try:
             ))
             # Línea de tendencia
             x_numeric = arange(len(ingresos_diarios))
-            y = ingresos_diarios[col_tramite_ing].values
+            y_vals = ingresos_diarios[col_tramite_ing].values # Renombrado para evitar conflicto
             if len(x_numeric) > 1:
-                z = polyfit(x_numeric, y, 1)
+                z = polyfit(x_numeric, y_vals, 1)
                 tendencia = z[0] * x_numeric + z[1]
                 fig.add_trace(go.Scatter(
                     x=ingresos_diarios[col_fecha_ing],
@@ -575,28 +580,20 @@ try:
             st.dataframe(tabla_15, use_container_width=True)
             # Gráfico de promedio semanal
             st.write("#### Promedio semanal de ingresos diarios")
-            # Usar el DataFrame original para el histórico
-            col_fecha_ing = 'FechaExpendiente'
-            col_tramite_ing = 'NumeroTramite'
             if col_fecha_ing not in df.columns:
-                st.warning("No se encontró la columna FechaExpendiente en los datos.")
+                st.warning("No se encontró la columna FechaExpendiente en los datos.") 
             else:
                 df_sem = df.copy()
                 df_sem[col_fecha_ing] = pd.to_datetime(df_sem[col_fecha_ing], errors='coerce')
-                # Filtrar el último año completo
-                fecha_max = df_sem[col_fecha_ing].max()
-                fecha_min = fecha_max - pd.Timedelta(days=365)
-                df_sem = df_sem[(df_sem[col_fecha_ing] >= fecha_min) & (df_sem[col_fecha_ing] <= fecha_max)]
-                # Agrupar por semana y calcular el promedio
+                fecha_max_sem = df_sem[col_fecha_ing].max() 
+                fecha_min_sem = fecha_max_sem - pd.Timedelta(days=365) 
+                df_sem = df_sem[(df_sem[col_fecha_ing] >= fecha_min_sem) & (df_sem[col_fecha_ing] <= fecha_max_sem)]
                 df_sem['Semana'] = df_sem[col_fecha_ing].dt.to_period('W').dt.start_time
                 ingresos_diarios_semanal = df_sem.groupby('Semana')[col_tramite_ing].count().reset_index()
                 ingresos_diarios_semanal = ingresos_diarios_semanal.rename(columns={col_tramite_ing: 'Total ingresos'})
                 ingresos_diarios_semanal['Promedio semanal'] = ingresos_diarios_semanal['Total ingresos'] / 7
-                # Formatear la fecha para el eje X
                 ingresos_diarios_semanal['Fecha'] = ingresos_diarios_semanal['Semana'].dt.strftime('%d/%m/%Y')
-                # Calcular el rango de fechas para cada semana (lunes a domingo)
                 ingresos_diarios_semanal['Rango de fechas'] = ingresos_diarios_semanal['Semana'].dt.strftime('%d/%m/%Y') + ' - ' + (ingresos_diarios_semanal['Semana'] + pd.Timedelta(days=6)).dt.strftime('%d/%m/%Y')
-                # Determinar si la semana actual aún no ha terminado
                 semana_actual = pd.Timestamp.today().to_period('W').start_time
                 ingresos_diarios_semanal['Es semana actual'] = ingresos_diarios_semanal['Semana'] == semana_actual
                 fig_sem = px.line(
@@ -608,116 +605,34 @@ try:
                     hover_data={'Rango de fechas': True}
                 )
                 fig_sem.update_traces(mode='lines+markers', marker=dict(color=ingresos_diarios_semanal['Es semana actual'].map({True: 'red', False: 'blue'})))
-                # Línea de tendencia SOLO para el año en curso
                 anio_actual = pd.Timestamp.today().year
                 mask_anio = ingresos_diarios_semanal['Semana'].dt.year == anio_actual
                 sem_actual = ingresos_diarios_semanal[mask_anio].reset_index(drop=True)
                 if len(sem_actual) > 1:
-                    x_numeric = np.arange(len(sem_actual))
-                    y = sem_actual['Promedio semanal'].values
-                    z = np.polyfit(x_numeric, y, 1)
-                    tendencia = z[0] * x_numeric + z[1]
+                    x_numeric_sem = np.arange(len(sem_actual)) 
+                    y_vals_sem = sem_actual['Promedio semanal'].values 
+                    z_sem = np.polyfit(x_numeric_sem, y_vals_sem, 1) 
+                    tendencia_sem = z_sem[0] * x_numeric_sem + z_sem[1] 
                     fig_sem.add_scatter(
                         x=sem_actual['Fecha'],
-                        y=tendencia,
+                        y=tendencia_sem,
                         mode='lines',
                         name='Tendencia año en curso',
                         line=dict(dash='dash', color='orange')
                     )
                 fig_sem.update_xaxes(tickangle=45)
                 st.plotly_chart(fig_sem, use_container_width=True)
-            st.write("""
-            **¿Qué muestra este gráfico?**
-            - Permite ver si el tiempo promedio para pretrabajar un expediente ha mejorado o empeorado a lo largo del año.
-            - Una tendencia descendente indica mayor eficiencia; una ascendente, posibles cuellos de botella o sobrecarga.
-            """)
-
-    with tab4:
-        st.header("Tiempos de Asignación y Pretrabajo")
-        st.subheader("Resumen de Tiempos Clave del Proceso")
-        operadores_excluir = [
-            "Aponte Sanchez, Paola Lita",
-            "Lucero Martinez, Carlos Martin",
-            "USUARIO DE AGENCIA DIGITAL",
-            "MAURICIO ROMERO, HUGO",
-            "Sin asignar"
-        ]
-        df_tiempo = df.copy()
-        for col in ["FechaExpendiente", "FECHA_ASIGNACION", "FechaPre"]:
-            if col in df_tiempo.columns:
-                df_tiempo[col] = pd.to_datetime(df_tiempo[col], errors='coerce')
-        df_tiempo = df_tiempo[~df_tiempo['OPERADOR'].isin(operadores_excluir)]
-        # Calcular tiempos y filtrar solo los necesarios para cada tramo
-        # 1. Ingreso → Asignación
-        mask_ia = df_tiempo['FechaExpendiente'].notna() & df_tiempo['FECHA_ASIGNACION'].notna()
-        dias_ia = (df_tiempo.loc[mask_ia, 'FECHA_ASIGNACION'] - df_tiempo.loc[mask_ia, 'FechaExpendiente']).dt.days
-        dias_ia = dias_ia[dias_ia >= 0]
-        # 2. Ingreso → Pretrabajo
-        mask_ip = df_tiempo['FechaExpendiente'].notna() & df_tiempo['FechaPre'].notna()
-        dias_ip = (df_tiempo.loc[mask_ip, 'FechaPre'] - df_tiempo.loc[mask_ip, 'FechaExpendiente']).dt.days
-        dias_ip = dias_ip[dias_ip >= 0]
-        # 3. Asignación → Pretrabajo
-        mask_ap = df_tiempo['FECHA_ASIGNACION'].notna() & df_tiempo['FechaPre'].notna()
-        dias_ap = (df_tiempo.loc[mask_ap, 'FechaPre'] - df_tiempo.loc[mask_ap, 'FECHA_ASIGNACION']).dt.days
-        dias_ap = dias_ap[dias_ap >= 0]
-        # Cuadro resumen
-        resumen = {
-            'Promedio (días)': [
-                round(dias_ia.mean(), 2),
-                round(dias_ip.mean(), 2),
-                round(dias_ap.mean(), 2)
-            ],
-            'Mediana (días)': [
-                round(dias_ia.median(), 2),
-                round(dias_ip.median(), 2),
-                round(dias_ap.median(), 2)
-            ],
-            'Expedientes': [
-                int(dias_ia.count()),
-                int(dias_ip.count()),
-                int(dias_ap.count())
-            ]
-        }
-        resumen_df = pd.DataFrame(resumen, index=[
-            'Ingreso → Asignación',
-            'Ingreso → Pretrabajo',
-            'Asignación → Pretrabajo'
-        ])
-        st.dataframe(resumen_df, use_container_width=True)
-        st.write("""
-        **¿Qué significa este cuadro?**
-        - Muestra el tiempo promedio y mediano (en días) que toma cada etapa clave del proceso.
-        - Si el tiempo de 'Asignación → Pretrabajo' es alto, puede haber expedientes asignados que demoran en ser trabajados.
-        - Si 'Ingreso → Asignación' es alto, puede haber demora en la asignación inicial.
-        - El número de expedientes indica cuántos casos válidos se analizaron para cada tramo.
-        """)
-
-        # Gráfico de evolución mensual del promedio de días Ingreso → Pretrabajo
-        st.write("#### Evolución del promedio de días desde Ingreso hasta Pretrabajo (último año)")
-        # Filtrar solo expedientes con ambas fechas válidas
-        mask_ip = df_tiempo['FechaExpendiente'].notna() & df_tiempo['FechaPre'].notna()
-        df_ip = df_tiempo.loc[mask_ip].copy()
-        df_ip = df_ip[df_ip['FechaPre'] >= df_ip['FechaExpendiente']]
-        df_ip['mes'] = df_ip['FechaPre'].dt.to_period('M').dt.to_timestamp()
-        df_ip_ultimo_anio = df_ip[df_ip['FechaPre'] >= (pd.Timestamp.today() - pd.DateOffset(years=1))]
-        promedio_mensual = df_ip_ultimo_anio.groupby('mes').apply(lambda x: (x['FechaPre'] - x['FechaExpendiente']).dt.days.mean())
-        promedio_mensual = promedio_mensual.reset_index(name='Promedio días')
-        fig = px.line(promedio_mensual, x='mes', y='Promedio días', markers=True, title='Promedio mensual de días desde Ingreso hasta Pretrabajo')
-        fig.update_traces(text=promedio_mensual['Promedio días'].round(1), textposition="top center")
-        fig.update_layout(xaxis_title='Mes', yaxis_title='Promedio de días', hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
-        st.write("""
-        **¿Qué muestra este gráfico?**
-        - Permite ver si el tiempo promedio para pretrabajar un expediente ha mejorado o empeorado a lo largo del año.
-        - Una tendencia descendente indica mayor eficiencia; una ascendente, posibles cuellos de botella o sobrecarga.
-        """)
+            st.write("""**¿Qué muestra este gráfico?**
+- Permite ver si el tiempo promedio para pretrabajar un expediente ha mejorado o empeorado a lo largo del año.
+- Una tendencia descendente indica mayor eficiencia; una ascendente, posibles cuellos de botella o sobrecarga.""")
 
     with tab5:
         st.header("Proyección de Cierre y Equilibrio")
-        st.write("### Simulador de Personal Activo y Proyección")
-        # 1. Pendientes actuales (asignados y sin asignar)
+        
+        # --- 1. Cálculos Base ---
+        # a. Pendientes actuales (del mismo filtro que tab1 y usado para el default de personal_activo_input)
         if proceso == "CCM":
-            df_pend = df[
+            df_pend_calc = df[
                 (df['UltimaEtapa'] == 'EVALUACIÓN - I') &
                 (df['EstadoPre'].isna()) &
                 (df['EstadoTramite'] == 'PENDIENTE') &
@@ -725,147 +640,214 @@ try:
             ]
         else:
             etapas_prr = [
-                'ACTUALIZAR DATOS BENEFICIARIO - F',
-                'ACTUALIZAR DATOS BENEFICIARIO - I',
-                'ASOCIACION BENEFICIARIO - F',
-                'ASOCIACION BENEFICIARIO - I',
-                'CONFORMIDAD SUB-DIREC.INMGRA. - I',
-                'PAGOS, FECHA Y NRO RD. - F',
-                'PAGOS, FECHA Y NRO RD. - I',
-                'RECEPCIÓN DINM - F'
+                'ACTUALIZAR DATOS BENEFICIARIO - F', 'ACTUALIZAR DATOS BENEFICIARIO - I',
+                'ASOCIACION BENEFICIARIO - F', 'ASOCIACION BENEFICIARIO - I',
+                'CONFORMIDAD SUB-DIREC.INMGRA. - I', 'PAGOS, FECHA Y NRO RD. - F',
+                'PAGOS, FECHA Y NRO RD. - I', 'RECEPCIÓN DINM - F'
             ]
-            df_pend = df[
+            df_pend_calc = df[
                 (df['UltimaEtapa'].isin(etapas_prr)) &
                 (df['EstadoPre'].isna()) &
                 (df['EstadoTramite'] == 'PENDIENTE') &
                 (df['EQUIPO'] != 'VULNERABLE')
             ]
-        pendientes_total = len(df_pend)
-        pendientes_sin_asignar = df_pend['OPERADOR'].isna().sum()
-        pendientes_asignados = pendientes_total - pendientes_sin_asignar
-        # 2. Ingresos diarios promedio (últimos 60 días)
+        pendientes_actuales_totales = len(df_pend_calc)
+        pendientes_sin_asignar_actuales = df_pend_calc['OPERADOR'].isna().sum()
+        pendientes_asignados_actuales = pendientes_actuales_totales - pendientes_sin_asignar_actuales
+
+        # b. Ingresos diarios promedio (últimos 60 días)
         df['FechaExpendiente'] = pd.to_datetime(df['FechaExpendiente'], errors='coerce')
-        fecha_max = df['FechaExpendiente'].max()
-        fecha_min = fecha_max - pd.Timedelta(days=60)
-        ingresos_ultimos = df[(df['FechaExpendiente'] >= fecha_min) & (df['FechaExpendiente'] <= fecha_max)]
-        ingresos_diarios = ingresos_ultimos.groupby('FechaExpendiente')['NumeroTramite'].count()
-        ingresos_promedio = ingresos_diarios.mean()
-        # Tomar el promedio de 'promedio_por_operador' de Producción Diaria
-        col_operador = 'OperadorPre'
-        col_fecha = 'FechaPre'
-        col_tramite = 'NumeroTramite'
-        if col_operador not in df.columns:
-            col_operador = 'OPERADOR'
-        if col_fecha not in df.columns:
-            col_fecha = 'FechaPre'
-        if pd.api.types.is_datetime64_any_dtype(df[col_fecha]):
-            fechas_ordenadas = df[col_fecha].dropna().sort_values().unique()
+        fecha_max_ingresos = df['FechaExpendiente'].max()
+        fecha_min_ingresos = fecha_max_ingresos - pd.Timedelta(days=60)
+        ingresos_ultimos_60d = df[(df['FechaExpendiente'] >= fecha_min_ingresos) & (df['FechaExpendiente'] <= fecha_max_ingresos)]
+        ingresos_diarios_promedio = ingresos_ultimos_60d.groupby(df['FechaExpendiente'].dt.date)['NumeroTramite'].count().mean()
+        if pd.isna(ingresos_diarios_promedio): ingresos_diarios_promedio = 0
+
+        # c. Productividad individual promedio (cierres diarios por persona, últimos 20 días)
+        # (Misma lógica que antes para 'promedio_por_operador')
+        col_operador_prod = 'OperadorPre'
+        col_fecha_prod = 'FechaPre'
+        col_tramite_prod = 'NumeroTramite'
+        if col_operador_prod not in df.columns: col_operador_prod = 'OPERADOR'
+        if col_fecha_prod not in df.columns: col_fecha_prod = 'FechaPre'
+        
+        if pd.api.types.is_datetime64_any_dtype(df[col_fecha_prod]):
+            fechas_ordenadas_prod = df[col_fecha_prod].dropna().sort_values().unique()
         else:
-            df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
-            fechas_ordenadas = df[col_fecha].dropna().sort_values().unique()
-        ultimos_20 = fechas_ordenadas[-20:]
-        df_20dias = df[df[col_fecha].isin(ultimos_20)]
-        operadores_excluir = [
-            "Aponte Sanchez, Paola Lita",
-            "Lucero Martinez, Carlos Martin",
-            "USUARIO DE AGENCIA DIGITAL",
-            "MAURICIO ROMERO, HUGO",
-            "Sin asignar"
+            df[col_fecha_prod] = pd.to_datetime(df[col_fecha_prod], errors='coerce')
+            fechas_ordenadas_prod = df[col_fecha_prod].dropna().sort_values().unique()
+        
+        ultimos_20_dias_prod = fechas_ordenadas_prod[-20:]
+        df_20dias_prod = df[df[col_fecha_prod].isin(ultimos_20_dias_prod)]
+        
+        operadores_excluir_prod = [
+            "Aponte Sanchez, Paola Lita", "Lucero Martinez, Carlos Martin",
+            "USUARIO DE AGENCIA DIGITAL", "MAURICIO ROMERO, HUGO", "Sin asignar"
         ]
-        df_20dias = df_20dias[~df_20dias[col_operador].isin(operadores_excluir)]
-        totales_operador = df_20dias.groupby(col_operador)[col_tramite].count()
-        operadores_validos = totales_operador[totales_operador >= 5].index
-        df_20dias = df_20dias[df_20dias[col_operador].isin(operadores_validos)]
-        resumen_prod = df_20dias.groupby(col_fecha).agg(
-            cantidad_operadores=(col_operador, lambda x: x.nunique()),
-            total_trabajados=(col_tramite, 'count')
+        df_20dias_prod = df_20dias_prod[~df_20dias_prod[col_operador_prod].isin(operadores_excluir_prod)]
+        
+        totales_operador_prod = df_20dias_prod.groupby(col_operador_prod)[col_tramite_prod].count()
+        operadores_validos_prod = totales_operador_prod[totales_operador_prod >= 5].index
+        df_20dias_prod = df_20dias_prod[df_20dias_prod[col_operador_prod].isin(operadores_validos_prod)]
+        
+        resumen_prod_diaria = df_20dias_prod.groupby(df[col_fecha_prod].dt.date).agg(
+            cantidad_operadores=(col_operador_prod, lambda x: x.nunique()),
+            total_trabajados=(col_tramite_prod, 'count')
         )
-        resumen_prod = resumen_prod.sort_index()
-        resumen_prod['promedio_por_operador'] = resumen_prod['total_trabajados'] / resumen_prod['cantidad_operadores']
-        promedio_por_operador = resumen_prod['promedio_por_operador'].mean() if not resumen_prod.empty else 0
-        # Ingreso manual de personal activo actual
-        personal_activo_input = st.number_input(
-            "Ingrese la cantidad de personal activo para la proyección:",
-            min_value=1, max_value=100, value=5, step=1
+        if not resumen_prod_diaria.empty and 'cantidad_operadores' in resumen_prod_diaria and 'total_trabajados' in resumen_prod_diaria:
+            resumen_prod_diaria = resumen_prod_diaria[resumen_prod_diaria['cantidad_operadores'] > 0] # Evitar división por cero
+            resumen_prod_diaria['promedio_por_operador'] = resumen_prod_diaria['total_trabajados'] / resumen_prod_diaria['cantidad_operadores']
+            productividad_individual_promedio = resumen_prod_diaria['promedio_por_operador'].mean()
+        else:
+            productividad_individual_promedio = 0
+        if pd.isna(productividad_individual_promedio) or productividad_individual_promedio == 0 : 
+            # Fallback si no hay datos de producción o es cero, para evitar divisiones por cero más adelante
+            # Podrías ajustar este valor o manejarlo de otra forma si es necesario.
+            productividad_individual_promedio = 1 # Asumir al menos 1 para evitar errores, o manejar con mensajes
+            st.warning("No se pudo calcular la productividad individual promedio o es cero. Se usará un valor de 1 para cálculos. Revise los datos de producción.")
+
+
+        # d. Personal activo por defecto (operadores con >= 5 pendientes)
+        operadores_con_pendientes = df_pend_calc.groupby('OPERADOR').size()
+        operadores_con_min_pendientes = operadores_con_pendientes[operadores_con_pendientes >= 5]
+        num_operadores_activos_defecto = len(operadores_con_min_pendientes)
+        if num_operadores_activos_defecto == 0: num_operadores_activos_defecto = 1 # Evitar que sea 0 por defecto
+
+        # --- 2. Input del Usuario ---
+        st.write("### Configure la Simulación")
+        personal_simulacion = st.number_input(
+            "Cantidad de personal activo para la simulación:",
+            min_value=1, max_value=100, value=num_operadores_activos_defecto, step=1
         )
-        cierres_proy_sim = promedio_por_operador * personal_activo_input  # Cierres diarios estimados
-        # Proyección de cierre
-        if cierres_proy_sim > 0:
-            dias_para_cerrar = pendientes_total / cierres_proy_sim
-        else:
-            dias_para_cerrar = float('inf')
-        # Punto de equilibrio
-        if ingresos_promedio > 0 and cierres_proy_sim > 0:
-            if cierres_proy_sim > ingresos_promedio:
-                equilibrio = "Ya se está cerrando más de lo que ingresa."
-            else:
-                equilibrio = f"Faltan {round((pendientes_total / (cierres_proy_sim - ingresos_promedio)), 1)} días para llegar al equilibrio (si la diferencia se mantiene)."
-        else:
-            equilibrio = "No hay datos suficientes para calcular el equilibrio."
-        # Cuadro resumen
-        resumen = {
-            'Variable': [
-                'Pendientes actuales',
-                'Pendientes asignados',
-                'Pendientes sin asignar',
-                'Ingresos diarios promedio (60 días)',
-                'Cierres diarios promedio por persona (20 días)',
-                'Personal activo para proyección',
-                'Cierres diarios estimados (simulados)',
-                'Días estimados para cerrar todo',
-                'Proyección de equilibrio'
+
+        # --- 3. Cálculos de Proyección ---
+        cierres_estimados_diarios_simulacion = productividad_individual_promedio * personal_simulacion
+        balance_diario_proyectado = cierres_estimados_diarios_simulacion - ingresos_diarios_promedio
+
+        # --- 4. Presentación del Resumen ---
+        st.write("### Resumen de Proyección")
+        
+        data_resumen = {
+            'Métrica': [
+                "**SITUACIÓN ACTUAL**",
+                "Pendientes Totales Actuales",
+                "Pendientes Asignados",
+                "Pendientes Sin Asignar",
+                "Ingresos Diarios Promedio (últimos 60 días)",
+                "Productividad Individual Promedio (cierres/persona/día, últimos 20 días)",
+                "**SIMULACIÓN CON PERSONAL CONFIGURADO**",
+                "Personal Activo en Simulación",
+                "Cierres Diarios Estimados (total equipo)",
+                "Balance Diario Proyectado (Cierres Estimados - Ingresos Promedio)",
+                "Proyección de Agotamiento de Pendientes Actuales",
+                "**ANÁLISIS DE EQUILIBRIO DE FLUJO (Ingresos = Cierres)**",
+                "Personal Necesario para Equilibrio de Flujo (aprox.)"
             ],
             'Valor': [
-                pendientes_total,
-                pendientes_asignados,
-                pendientes_sin_asignar,
-                round(ingresos_promedio, 2),
-                round(promedio_por_operador, 2),
-                personal_activo_input,
-                round(cierres_proy_sim, 2),
-                round(dias_para_cerrar, 1) if dias_para_cerrar != float('inf') else '∞',
-                equilibrio
+                "", # Separador
+                f"{pendientes_actuales_totales}",
+                f"{pendientes_asignados_actuales}",
+                f"{pendientes_sin_asignar_actuales}",
+                f"{ingresos_diarios_promedio:.2f}",
+                f"{productividad_individual_promedio:.2f}",
+                "", # Separador
+                f"{personal_simulacion}",
+                f"{cierres_estimados_diarios_simulacion:.2f}",
+                "", # Llenado dinámico abajo
+                "", # Llenado dinámico abajo
+                "", # Separador
+                ""  # Llenado dinámico abajo
             ]
         }
-        resumen_df = pd.DataFrame(resumen)
-        st.dataframe(resumen_df, use_container_width=True)
+
+        # Llenado dinámico de Balance Diario
+        if balance_diario_proyectado > 0:
+            data_resumen['Valor'][9] = f"Superávit de {balance_diario_proyectado:.2f} expedientes/día. (Pendientes tienden a disminuir)"
+        elif balance_diario_proyectado < 0:
+            data_resumen['Valor'][9] = f"Déficit de {abs(balance_diario_proyectado):.2f} expedientes/día. (Pendientes tienden a aumentar)"
+        else:
+            data_resumen['Valor'][9] = "Equilibrio: 0 expedientes/día. (Pendientes tienden a mantenerse estables)"
+
+        # Llenado dinámico de Días para Cero Pendientes
+        if balance_diario_proyectado > 0:
+            dias_para_cero_pendientes = pendientes_actuales_totales / balance_diario_proyectado
+            data_resumen['Valor'][10] = f"{dias_para_cero_pendientes:.1f} días (si el ritmo se mantiene)"
+        else:
+            data_resumen['Valor'][10] = "No se agotarán los pendientes actuales con este ritmo."
+            dias_para_cero_pendientes = float('inf') # Para el gráfico
+
+        # Llenado dinámico de Personal para Equilibrio
+        if productividad_individual_promedio > 0:
+            personal_eq_flujo = np.ceil(ingresos_diarios_promedio / productividad_individual_promedio)
+            data_resumen['Valor'][12] = f"{int(personal_eq_flujo)} personas"
+        else:
+            data_resumen['Valor'][12] = "No calculable (productividad individual es cero o no disponible)"
+
+        resumen_df = pd.DataFrame(data_resumen)
+        st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+        
         st.write("""
-        **¿Cómo se calculan estas métricas?**
-        - **Pendientes actuales:** cantidad de expedientes pendientes según los filtros de pendientes.
-        - **Pendientes asignados/sin asignar:** según si tienen OPERADOR asignado o no.
-        - **Ingresos diarios promedio (60 días):** suma de expedientes ingresados en los últimos 60 días dividido entre 60.
-        - **Cierres diarios promedio por persona (20 días):** promedio de 'promedio_por_operador' de Producción Diaria.
-        - **Personal activo para proyección:** valor que tú ingresas.
-        - **Cierres diarios estimados (simulados):** cierres diarios promedio por persona x personal activo ingresado.
-        - **Días estimados para cerrar todo:** pendientes actuales / cierres diarios estimados.
-        - **Proyección de equilibrio:** días para que (pendientes actuales / (cierres estimados - ingresos promedio)) llegue a cero, si los cierres superan los ingresos.
+        **Interpretación del Resumen:**
+        - **Situación Actual:** Muestra el estado actual de pendientes, ingresos y la capacidad de cierre individual.
+        - **Simulación:** Proyecta el impacto del personal configurado. El "Balance Diario" es clave:
+            - *Superávit*: Se cierran más expedientes de los que ingresan diariamente.
+            - *Déficit*: Ingresan más expedientes de los que se cierran diariamente.
+            - *Equilibrio*: Los cierres diarios igualan a los ingresos.
+        - **Análisis de Equilibrio de Flujo:** Indica cuántas personas se necesitarían para que la cantidad de expedientes cerrados por día iguale la cantidad de expedientes que ingresan por día. Este es el punto donde el *stock* de pendientes dejaría de crecer.
         """)
-        # Tabla y gráfico de proyección
-        max_dias = 180 if dias_para_cerrar == float('inf') else int(dias_para_cerrar) + 30
-        dias = list(range(0, max_dias + 1))
-        pendientes_proyectados = [max(pendientes_total - cierres_proy_sim * d + ingresos_promedio * d, 0) for d in dias]
-        ingresos_proy = [ingresos_promedio for _ in dias]
-        cierres_proy = [cierres_proy_sim for _ in dias]
-        tabla_proy = pd.DataFrame({
-            'Día': dias,
-            'Pendientes proyectados': pendientes_proyectados,
-            'Ingresos diarios estimados': ingresos_proy,
-            'Cierres diarios estimados': cierres_proy
-        })
-        st.write("#### Tabla de proyección diaria (hasta 180 días o cierre)")
-        st.dataframe(tabla_proy.head(60), use_container_width=True)
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=tabla_proy['Día'], y=tabla_proy['Pendientes proyectados'], mode='lines+markers', name='Pendientes proyectados'))
-        fig.add_trace(go.Scatter(x=tabla_proy['Día'], y=tabla_proy['Ingresos diarios estimados'], mode='lines', name='Ingresos diarios estimados', line=dict(dash='dot', color='green')))
-        fig.add_trace(go.Scatter(x=tabla_proy['Día'], y=tabla_proy['Cierres diarios estimados'], mode='lines', name='Cierres diarios estimados', line=dict(dash='dot', color='blue')))
-        fig.update_layout(title='Proyección de Pendientes, Ingresos y Cierres en el Tiempo', xaxis_title='Días desde hoy', yaxis_title='Cantidad', hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
-        st.write("""
-        **¿Qué muestra la tabla y el gráfico?**
-        - Simulan día a día cómo evolucionarían los pendientes, ingresos y cierres si se mantiene el ritmo actual y el personal activo ingresado.
-        - La tabla muestra los primeros 60 días, el gráfico hasta 180 días o hasta que los pendientes lleguen a cero.
-        - Si la curva de pendientes baja a cero, se estima en cuántos días se cerrarían todos los pendientes.
-        - Si la curva se estabiliza, se estaría llegando al punto de equilibrio.
+
+        # --- 5. Gráfico de Proyección ---
+        st.write("### Gráfico de Proyección de Pendientes")
+        
+        max_dias_grafico = 180 
+        if balance_diario_proyectado > 0 and dias_para_cero_pendientes != float('inf'):
+             # Si se proyecta cierre, mostrar un poco más allá del cierre o hasta 180 días
+            max_dias_grafico = min(max_dias_grafico, int(dias_para_cero_pendientes) + 30)
+        
+        dias_proy = list(range(0, max_dias_grafico + 1))
+        
+        # Pendientes proyectados: stock_inicial - (balance_diario * dias)
+        # balance_diario = cierres_estimados - ingresos_promedio
+        # pendientes_proy = pendientes_actuales - (cierres_estimados - ingresos_promedio) * dias
+        # pendientes_proy = pendientes_actuales - cierres_estimados * dias + ingresos_promedio * dias
+        pendientes_proyectados_graf = [max(0, pendientes_actuales_totales - balance_diario_proyectado * d) for d in dias_proy]
+        
+        # Para el gráfico, también podemos mostrar las líneas de ingresos y cierres acumulados si es útil,
+        # pero la línea de pendientes proyectados ya los considera.
+        # Mostremos solo la evolución del stock de pendientes.
+
+        fig_proy = go.Figure()
+        fig_proy.add_trace(go.Scatter(
+            x=dias_proy, 
+            y=pendientes_proyectados_graf, 
+            mode='lines+markers', 
+            name='Pendientes Proyectados'
+        ))
+
+        fig_proy.update_layout(
+            title='Evolución Estimada del Total de Pendientes',
+            xaxis_title='Días desde Hoy',
+            yaxis_title='Cantidad de Pendientes',
+            hovermode='x unified'
+        )
+        
+        # Añadir línea de ingresos y cierres estimados si se desea para comparación
+        # (opcional, ya que el balance está en la línea de pendientes)
+        # fig_proy.add_trace(go.Scatter(x=dias_proy, y=[ingresos_diarios_promedio * d for d in dias_proy], mode='lines', name='Ingresos Acumulados Estimados', line=dict(dash='dot')))
+        # fig_proy.add_trace(go.Scatter(x=dias_proy, y=[cierres_estimados_diarios_simulacion * d for d in dias_proy], mode='lines', name='Cierres Acumulados Estimados', line=dict(dash='dot')))
+
+        st.plotly_chart(fig_proy, use_container_width=True)
+        
+        st.write(f"""
+        **Interpretación del Gráfico:**
+        - El gráfico muestra cómo se proyecta que evolucione el **stock total de pendientes** día a día, considerando:
+            - El total de pendientes actuales.
+            - Los ingresos diarios promedio estimados ({ingresos_diarios_promedio:.2f}).
+            - Los cierres diarios estimados con el personal configurado ({cierres_estimados_diarios_simulacion:.2f}).
+        - **Si la línea desciende:** Los cierres superan a los ingresos. El punto donde cruza el eje X (cero pendientes) es la estimación de días para agotar los pendientes actuales.
+        - **Si la línea asciende:** Los ingresos superan a los cierres. Los pendientes aumentarán.
+        - **Si la línea es horizontal:** Los ingresos igualan a los cierres. El stock de pendientes se mantendría estable.
+        Este gráfico asume que los promedios de ingresos y la productividad individual se mantienen constantes durante el período de proyección.
         """)
 
     # --- Nueva pestaña: Evolución Pendientes x Operador ---
@@ -886,7 +868,7 @@ try:
         proceso_sel = proceso
         anios_disp = historico[historico['Proceso'] == proceso_sel]['Año'].unique().tolist()
         anios_disp = sorted(set(anios_disp), reverse=True, key=lambda x: (x != 'ANTIGUOS', x))
-        anios_sel = st.multiselect("Año(s)", options=['Todos'] + anios_disp, default=anios_disp[:1] if anios_disp else [])
+        anios_sel = st.multiselect("Año(s)", options=['Todos'] + anios_disp, default=['Todos'])
         if 'Todos' in anios_sel or not anios_sel:
             # Mostrar solo fechas que existen en todos los años
             anios_validos = [a for a in anios_disp if a != 'Todos']
