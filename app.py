@@ -10,6 +10,7 @@ import plotly.figure_factory as ff
 from numpy import polyfit, arange
 import numpy as np
 import datetime
+import pytz
 
 # Configuración de la página
 st.set_page_config(
@@ -167,8 +168,11 @@ try:
             var_name='Año',
             value_name='Pendientes'
         )
-        # Agregar columnas de fecha y proceso
-        tabla_historico['Fecha'] = datetime.date.today().strftime('%Y-%m-%d')
+        # Agregar columnas de fecha local y proceso
+        from datetime import datetime
+        tz = pytz.timezone('America/Lima')
+        fecha_hoy_local = datetime.now(tz).strftime('%Y-%m-%d')
+        tabla_historico['Fecha'] = fecha_hoy_local
         tabla_historico['Proceso'] = proceso
         # Reordenar columnas
         tabla_historico = tabla_historico[['Fecha', 'Proceso', 'OPERADOR', 'Año', 'Pendientes']]
@@ -185,17 +189,22 @@ try:
         except FileNotFoundError:
             historico_existente = pd.DataFrame(columns=tabla_historico.columns)
 
-        # Merge anti-join para obtener solo los registros nuevos
+        # --- Nueva lógica: solo actualizar si los valores de pendientes realmente cambiaron ---
         claves = ['Fecha', 'Proceso', 'OPERADOR', 'Año']
         if not historico_existente.empty:
+            # Hacemos merge para comparar valores existentes y nuevos
             merge = tabla_historico.merge(
-                historico_existente[claves],
+                historico_existente,
                 on=claves,
                 how='left',
-                indicator=True
+                suffixes=('', '_old')
             )
-            tabla_historico_filtrada = merge[merge['_merge'] == 'left_only'].drop(columns=['_merge'])
-            historico_actualizado = pd.concat([historico_existente, tabla_historico_filtrada], ignore_index=True)
+            # Solo tomar los registros donde el valor de Pendientes es diferente o no existe
+            tabla_historico_filtrada = merge[(merge['Pendientes_old'].isna()) | (merge['Pendientes'] != merge['Pendientes_old'])][tabla_historico.columns]
+            # Eliminar del histórico existente los registros que vamos a actualizar
+            historico_actualizado = historico_existente[~historico_existente.set_index(claves).index.isin(tabla_historico_filtrada.set_index(claves).index)]
+            # Concatenar los nuevos registros (actualizados o nuevos)
+            historico_actualizado = pd.concat([historico_actualizado, tabla_historico_filtrada], ignore_index=True)
         else:
             tabla_historico_filtrada = tabla_historico.copy()
             historico_actualizado = tabla_historico.copy()
