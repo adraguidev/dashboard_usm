@@ -12,7 +12,7 @@ from typing import Dict, Optional
 @st.cache_data
 def cargar_datos(archivo: str) -> pd.DataFrame:
     """
-    Carga los datos desde un archivo Excel
+    Carga los datos desde un archivo pickle comprimido (.pkl.gz)
     
     Args:
         archivo: Nombre del archivo a cargar
@@ -20,7 +20,7 @@ def cargar_datos(archivo: str) -> pd.DataFrame:
     Returns:
         DataFrame con los datos cargados
     """
-    return pd.read_excel(f"ARCHIVOS/{archivo}")
+    return pd.read_pickle(f"ARCHIVOS/{archivo}")
 
 def obtener_archivos_proceso() -> Dict[str, str]:
     """
@@ -30,8 +30,8 @@ def obtener_archivos_proceso() -> Dict[str, str]:
         Diccionario con el mapeo proceso -> archivo
     """
     return {
-        "CCM": "consolidado_final_CCM_personal.xlsx",
-        "PRR": "consolidado_final_PRR_personal.xlsx"
+        "CCM": "consolidado_final_CCM_personal.pkl.gz",
+        "PRR": "consolidado_final_PRR_personal.pkl.gz"
     }
 
 def filtrar_pendientes_ccm(df: pd.DataFrame) -> pd.DataFrame:
@@ -98,6 +98,13 @@ def procesar_pendientes(df: pd.DataFrame, proceso: str) -> pd.DataFrame:
     
     # Reemplazar nulos en OPERADOR por 'Sin asignar'
     df_filtrado = df_filtrado.copy()
+    
+    # Manejar columnas categóricas: convertir a string primero si es necesario
+    if pd.api.types.is_categorical_dtype(df_filtrado['OPERADOR']):
+        # Si es categórica, agregar 'Sin asignar' a las categorías primero
+        if 'Sin asignar' not in df_filtrado['OPERADOR'].cat.categories:
+            df_filtrado['OPERADOR'] = df_filtrado['OPERADOR'].cat.add_categories(['Sin asignar'])
+    
     df_filtrado['OPERADOR'] = df_filtrado['OPERADOR'].fillna('Sin asignar')
     
     return df_filtrado

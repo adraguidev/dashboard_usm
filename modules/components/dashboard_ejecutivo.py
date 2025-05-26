@@ -23,59 +23,25 @@ def mostrar_dashboard_ejecutivo() -> None:
     st.header("📊 Dashboard Ejecutivo")
     st.markdown("*Vista consolidada para toma de decisiones estratégicas*")
     
-    # Cargar datos de ambos procesos con manejo de errores mejorado
+    # Cargar datos de ambos procesos
     try:
         archivos = obtener_archivos_proceso()
-        
-        # Cargar con progress bar para feedback visual
-        progress_bar = st.progress(0)
-        
-        with st.spinner("Cargando datos CCM..."):
-            df_ccm = cargar_datos(archivos["CCM"])
-            progress_bar.progress(25)
-        
-        with st.spinner("Cargando datos PRR..."):
-            df_prr = cargar_datos(archivos["PRR"])
-            progress_bar.progress(50)
-        
-        progress_bar.progress(100)
-        progress_bar.empty()
-        
-    except FileNotFoundError as e:
-        st.error(f"❌ Archivo no encontrado: {str(e)}")
-        st.info("Verifica que los archivos Excel estén en la carpeta ARCHIVOS/")
-        return
+        df_ccm = cargar_datos(archivos["CCM"])
+        df_prr = cargar_datos(archivos["PRR"])
     except Exception as e:
-        st.error(f"❌ Error inesperado al cargar datos: {str(e)}")
-        st.info("Intenta recargar la página o contacta al administrador")
+        st.error(f"Error al cargar datos: {str(e)}")
         return
     
     # Calcular métricas usando las mismas funciones que cada pestaña
-    try:
-        with st.spinner("Calculando métricas CCM..."):
-            metricas_ccm = _calcular_metricas_exactas_ccm(df_ccm)
-            progress_bar.progress(60)
-        
-        with st.spinner("Calculando métricas PRR..."):
-            metricas_prr = _calcular_metricas_exactas_prr(df_prr)
-            progress_bar.progress(70)
-        
-        metricas_consolidadas = _consolidar_metricas(metricas_ccm, metricas_prr)
-        progress_bar.progress(80)
-        
-        # Actualizar histórico solo de sin asignar (si los datos cambiaron)
-        with st.spinner("Actualizando históricos..."):
-            actualizar_historico_sin_asignar(df_ccm, df_prr)
-            progress_bar.progress(90)
-        
-        # Calcular tendencias usando históricos existentes
-        tendencias = _calcular_tendencias_reales(metricas_ccm, metricas_prr)
-        progress_bar.progress(100)
-        progress_bar.empty()
-        
-    except Exception as e:
-        st.error(f"❌ Error en cálculos: {str(e)}")
-        return
+    metricas_ccm = _calcular_metricas_exactas_ccm(df_ccm)
+    metricas_prr = _calcular_metricas_exactas_prr(df_prr)
+    metricas_consolidadas = _consolidar_metricas(metricas_ccm, metricas_prr)
+    
+    # Actualizar histórico solo de sin asignar (si los datos cambiaron)
+    actualizar_historico_sin_asignar(df_ccm, df_prr)
+    
+    # Calcular tendencias usando históricos existentes
+    tendencias = _calcular_tendencias_reales(metricas_ccm, metricas_prr)
     
     # === LAYOUT PRINCIPAL ORGANIZADO ===
     st.markdown("---")
@@ -109,169 +75,141 @@ def mostrar_dashboard_ejecutivo() -> None:
         # Tabla comparativa (sin gráfico de eficiencia)
         _mostrar_tabla_comparativa(metricas_ccm, metricas_prr)
 
-@st.cache_data(ttl=300)  # Cache por 5 minutos
 def _calcular_metricas_exactas_ccm(df: pd.DataFrame) -> dict:
     """
     Calcula métricas para CCM usando exactamente las mismas funciones que cada pestaña
     """
-    try:
-        # === PENDIENTES (misma función que pestaña Pendientes) ===
-        df_filtrado = procesar_pendientes(df, "CCM")
-        tabla_pendientes = crear_tabla_pendientes(df_filtrado, "CCM")
-        
-        # Total = tabla + sin asignar
-        tabla_total = int(tabla_pendientes.loc['Total', 'Total']) if 'Total' in tabla_pendientes.index else 0
-        sin_asignar = calcular_sin_asignar(df_filtrado)
-        total_pendientes = tabla_total + sin_asignar
-        asignados = tabla_total
-        
-        # Operadores activos (de la tabla, excluyendo 'Total')
-        operadores_en_tabla = [idx for idx in tabla_pendientes.index if idx != 'Total']
-        operadores_activos = len(operadores_en_tabla)
-        
-        # === PRODUCCIÓN DIARIA (misma lógica que pestaña Producción Diaria) ===
-        col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
-        col_fecha = 'FechaPre'
-        col_tramite = 'NumeroTramite'
-        
-        # Preparar fechas
-        if not pd.api.types.is_datetime64_any_dtype(df[col_fecha]):
-            df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
-        
-        fechas_ordenadas = df[col_fecha].dropna().sort_values().unique()
-        ultimos_20_dias = fechas_ordenadas[-20:]
-        df_20dias = df[df[col_fecha].isin(ultimos_20_dias)]
-        
-        # Filtros exactos de producción diaria
-        operadores_excluir = [
-            "Aponte Sanchez, Paola Lita", 
-            "Lucero Martinez, Carlos Martin", 
-            "USUARIO DE AGENCIA DIGITAL"
-        ]
-        
-        df_resumen = df_20dias[~df_20dias[col_operador].isin(operadores_excluir)].copy()
-        
-        # Filtrar operadores con >= 5 trámites
-        totales_operador = df_resumen.groupby(col_operador)[col_tramite].count()
-        operadores_validos = totales_operador[totales_operador >= 5].index
-        df_resumen = df_resumen[df_resumen[col_operador].isin(operadores_validos)]
-        
-        # Calcular producción diaria igual que en la pestaña
-        resumen = df_resumen.groupby(col_fecha).agg(
-            total_trabajados=(col_tramite, 'count')
-        )
-        produccion_diaria = resumen['total_trabajados'].sum() / len(ultimos_20_dias) if len(ultimos_20_dias) > 0 else 0
-        
-        # Ingresos diarios (últimos 30 días)
-        df['FechaExpendiente'] = pd.to_datetime(df['FechaExpendiente'], errors='coerce')
-        fecha_limite = df['FechaExpendiente'].max() - pd.Timedelta(days=30)
-        ingresos_recientes = df[df['FechaExpendiente'] >= fecha_limite]['NumeroTramite'].count()
-        ingresos_diarios = ingresos_recientes / 30
-        
-        return {
-            'proceso': 'CCM',
-            'total_pendientes': total_pendientes,
-            'sin_asignar': sin_asignar,
-            'asignados': asignados,
-            'operadores_activos': operadores_activos,
-            'produccion_diaria': produccion_diaria,
-            'ingresos_diarios': ingresos_diarios,
-            'promedio_por_operador': asignados / operadores_activos if operadores_activos > 0 else 0
-        }
-    except Exception as e:
-        st.error(f"Error calculando métricas CCM: {str(e)}")
-        return {
-            'proceso': 'CCM',
-            'total_pendientes': 0,
-            'sin_asignar': 0,
-            'asignados': 0,
-            'operadores_activos': 0,
-            'produccion_diaria': 0,
-            'ingresos_diarios': 0,
-            'promedio_por_operador': 0
-        }
+    # === PENDIENTES (misma función que pestaña Pendientes) ===
+    df_filtrado = procesar_pendientes(df, "CCM")
+    tabla_pendientes = crear_tabla_pendientes(df_filtrado, "CCM")
+    
+    # Total = tabla + sin asignar
+    tabla_total = int(tabla_pendientes.loc['Total', 'Total']) if 'Total' in tabla_pendientes.index else 0
+    sin_asignar = calcular_sin_asignar(df_filtrado)
+    total_pendientes = tabla_total + sin_asignar
+    asignados = tabla_total
+    
+    # Operadores activos (de la tabla, excluyendo 'Total')
+    operadores_en_tabla = [idx for idx in tabla_pendientes.index if idx != 'Total']
+    operadores_activos = len(operadores_en_tabla)
+    
+    # === PRODUCCIÓN DIARIA (misma lógica que pestaña Producción Diaria) ===
+    col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
+    col_fecha = 'FechaPre'
+    col_tramite = 'NumeroTramite'
+    
+    # Preparar fechas
+    if not pd.api.types.is_datetime64_any_dtype(df[col_fecha]):
+        df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
+    
+    fechas_ordenadas = df[col_fecha].dropna().sort_values().unique()
+    ultimos_20_dias = fechas_ordenadas[-20:]
+    df_20dias = df[df[col_fecha].isin(ultimos_20_dias)]
+    
+    # Filtros exactos de producción diaria
+    operadores_excluir = [
+        "Aponte Sanchez, Paola Lita", 
+        "Lucero Martinez, Carlos Martin", 
+        "USUARIO DE AGENCIA DIGITAL"
+    ]
+    
+    df_resumen = df_20dias[~df_20dias[col_operador].isin(operadores_excluir)].copy()
+    
+    # Filtrar operadores con >= 5 trámites
+    totales_operador = df_resumen.groupby(col_operador)[col_tramite].count()
+    operadores_validos = totales_operador[totales_operador >= 5].index
+    df_resumen = df_resumen[df_resumen[col_operador].isin(operadores_validos)]
+    
+    # Calcular producción diaria igual que en la pestaña
+    resumen = df_resumen.groupby(col_fecha).agg(
+        total_trabajados=(col_tramite, 'count')
+    )
+    produccion_diaria = resumen['total_trabajados'].sum() / len(ultimos_20_dias) if len(ultimos_20_dias) > 0 else 0
+    
+    # Ingresos diarios (últimos 30 días)
+    df['FechaExpendiente'] = pd.to_datetime(df['FechaExpendiente'], errors='coerce')
+    fecha_limite = df['FechaExpendiente'].max() - pd.Timedelta(days=30)
+    ingresos_recientes = df[df['FechaExpendiente'] >= fecha_limite]['NumeroTramite'].count()
+    ingresos_diarios = ingresos_recientes / 30
+    
+    return {
+        'proceso': 'CCM',
+        'total_pendientes': total_pendientes,
+        'sin_asignar': sin_asignar,
+        'asignados': asignados,
+        'operadores_activos': operadores_activos,
+        'produccion_diaria': produccion_diaria,
+        'ingresos_diarios': ingresos_diarios,
+        'promedio_por_operador': asignados / operadores_activos if operadores_activos > 0 else 0
+    }
 
-@st.cache_data(ttl=300)  # Cache por 5 minutos
 def _calcular_metricas_exactas_prr(df: pd.DataFrame) -> dict:
     """
     Calcula métricas para PRR usando exactamente las mismas funciones que cada pestaña
     """
-    try:
-        # === PENDIENTES (misma función que pestaña Pendientes) ===
-        df_filtrado = procesar_pendientes(df, "PRR")
-        tabla_pendientes = crear_tabla_pendientes(df_filtrado, "PRR")
-        
-        # Total = tabla + sin asignar
-        tabla_total = int(tabla_pendientes.loc['Total', 'Total']) if 'Total' in tabla_pendientes.index else 0
-        sin_asignar = calcular_sin_asignar(df_filtrado)
-        total_pendientes = tabla_total + sin_asignar
-        asignados = tabla_total
-        
-        # Operadores activos (de la tabla, excluyendo 'Total')
-        operadores_en_tabla = [idx for idx in tabla_pendientes.index if idx != 'Total']
-        operadores_activos = len(operadores_en_tabla)
-        
-        # === PRODUCCIÓN DIARIA (misma lógica que pestaña Producción Diaria) ===
-        col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
-        col_fecha = 'FechaPre'
-        col_tramite = 'NumeroTramite'
-        
-        # Preparar fechas
-        if not pd.api.types.is_datetime64_any_dtype(df[col_fecha]):
-            df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
-        
-        fechas_ordenadas = df[col_fecha].dropna().sort_values().unique()
-        ultimos_20_dias = fechas_ordenadas[-20:]
-        df_20dias = df[df[col_fecha].isin(ultimos_20_dias)]
-        
-        # Filtros exactos de producción diaria
-        operadores_excluir = [
-            "Aponte Sanchez, Paola Lita", 
-            "Lucero Martinez, Carlos Martin", 
-            "USUARIO DE AGENCIA DIGITAL"
-        ]
-        
-        df_resumen = df_20dias[~df_20dias[col_operador].isin(operadores_excluir)].copy()
-        
-        # Filtrar operadores con >= 5 trámites
-        totales_operador = df_resumen.groupby(col_operador)[col_tramite].count()
-        operadores_validos = totales_operador[totales_operador >= 5].index
-        df_resumen = df_resumen[df_resumen[col_operador].isin(operadores_validos)]
-        
-        # Calcular producción diaria igual que en la pestaña
-        resumen = df_resumen.groupby(col_fecha).agg(
-            total_trabajados=(col_tramite, 'count')
-        )
-        produccion_diaria = resumen['total_trabajados'].sum() / len(ultimos_20_dias) if len(ultimos_20_dias) > 0 else 0
-        
-        # Ingresos diarios (últimos 30 días)
-        df['FechaExpendiente'] = pd.to_datetime(df['FechaExpendiente'], errors='coerce')
-        fecha_limite = df['FechaExpendiente'].max() - pd.Timedelta(days=30)
-        ingresos_recientes = df[df['FechaExpendiente'] >= fecha_limite]['NumeroTramite'].count()
-        ingresos_diarios = ingresos_recientes / 30
-        
-        return {
-            'proceso': 'PRR',
-            'total_pendientes': total_pendientes,
-            'sin_asignar': sin_asignar,
-            'asignados': asignados,
-            'operadores_activos': operadores_activos,
-            'produccion_diaria': produccion_diaria,
-            'ingresos_diarios': ingresos_diarios,
-            'promedio_por_operador': asignados / operadores_activos if operadores_activos > 0 else 0
-        }
-    except Exception as e:
-        st.error(f"Error calculando métricas PRR: {str(e)}")
-        return {
-            'proceso': 'PRR',
-            'total_pendientes': 0,
-            'sin_asignar': 0,
-            'asignados': 0,
-            'operadores_activos': 0,
-            'produccion_diaria': 0,
-            'ingresos_diarios': 0,
-            'promedio_por_operador': 0
-        }
+    # === PENDIENTES (misma función que pestaña Pendientes) ===
+    df_filtrado = procesar_pendientes(df, "PRR")
+    tabla_pendientes = crear_tabla_pendientes(df_filtrado, "PRR")
+    
+    # Total = tabla + sin asignar
+    tabla_total = int(tabla_pendientes.loc['Total', 'Total']) if 'Total' in tabla_pendientes.index else 0
+    sin_asignar = calcular_sin_asignar(df_filtrado)
+    total_pendientes = tabla_total + sin_asignar
+    asignados = tabla_total
+    
+    # Operadores activos (de la tabla, excluyendo 'Total')
+    operadores_en_tabla = [idx for idx in tabla_pendientes.index if idx != 'Total']
+    operadores_activos = len(operadores_en_tabla)
+    
+    # === PRODUCCIÓN DIARIA (misma lógica que pestaña Producción Diaria) ===
+    col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
+    col_fecha = 'FechaPre'
+    col_tramite = 'NumeroTramite'
+    
+    # Preparar fechas
+    if not pd.api.types.is_datetime64_any_dtype(df[col_fecha]):
+        df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
+    
+    fechas_ordenadas = df[col_fecha].dropna().sort_values().unique()
+    ultimos_20_dias = fechas_ordenadas[-20:]
+    df_20dias = df[df[col_fecha].isin(ultimos_20_dias)]
+    
+    # Filtros exactos de producción diaria
+    operadores_excluir = [
+        "Aponte Sanchez, Paola Lita", 
+        "Lucero Martinez, Carlos Martin", 
+        "USUARIO DE AGENCIA DIGITAL"
+    ]
+    
+    df_resumen = df_20dias[~df_20dias[col_operador].isin(operadores_excluir)].copy()
+    
+    # Filtrar operadores con >= 5 trámites
+    totales_operador = df_resumen.groupby(col_operador)[col_tramite].count()
+    operadores_validos = totales_operador[totales_operador >= 5].index
+    df_resumen = df_resumen[df_resumen[col_operador].isin(operadores_validos)]
+    
+    # Calcular producción diaria igual que en la pestaña
+    resumen = df_resumen.groupby(col_fecha).agg(
+        total_trabajados=(col_tramite, 'count')
+    )
+    produccion_diaria = resumen['total_trabajados'].sum() / len(ultimos_20_dias) if len(ultimos_20_dias) > 0 else 0
+    
+    # Ingresos diarios (últimos 30 días)
+    df['FechaExpendiente'] = pd.to_datetime(df['FechaExpendiente'], errors='coerce')
+    fecha_limite = df['FechaExpendiente'].max() - pd.Timedelta(days=30)
+    ingresos_recientes = df[df['FechaExpendiente'] >= fecha_limite]['NumeroTramite'].count()
+    ingresos_diarios = ingresos_recientes / 30
+    
+    return {
+        'proceso': 'PRR',
+        'total_pendientes': total_pendientes,
+        'sin_asignar': sin_asignar,
+        'asignados': asignados,
+        'operadores_activos': operadores_activos,
+        'produccion_diaria': produccion_diaria,
+        'ingresos_diarios': ingresos_diarios,
+        'promedio_por_operador': asignados / operadores_activos if operadores_activos > 0 else 0
+    }
 
 def _consolidar_metricas(metricas_ccm: dict, metricas_prr: dict) -> dict:
     """
