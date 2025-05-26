@@ -340,7 +340,7 @@ def _mostrar_kpis_principales(consolidadas: dict, ccm: dict, prr: dict, tendenci
     
     with col1:
         # CCM - Pendientes CON DELTA
-        delta_ccm = tendencias['ccm'].get('delta_pendientes', 0)
+        delta_ccm = int(tendencias['ccm'].get('delta_pendientes', 0))
         st.metric(
             "CCM - Pendientes", 
             f"{ccm['total_pendientes']:,}",
@@ -351,7 +351,7 @@ def _mostrar_kpis_principales(consolidadas: dict, ccm: dict, prr: dict, tendenci
     
     with col2:
         # PRR - Pendientes CON DELTA
-        delta_prr = tendencias['prr'].get('delta_pendientes', 0)
+        delta_prr = int(tendencias['prr'].get('delta_pendientes', 0))
         st.metric(
             "PRR - Pendientes", 
             f"{prr['total_pendientes']:,}",
@@ -362,7 +362,7 @@ def _mostrar_kpis_principales(consolidadas: dict, ccm: dict, prr: dict, tendenci
     
     with col3:
         # Sin asignar con tendencia real
-        delta_sin_asignar = tendencias['ccm']['delta_sin_asignar'] + tendencias['prr']['delta_sin_asignar']
+        delta_sin_asignar = int(tendencias['ccm']['delta_sin_asignar']) + int(tendencias['prr']['delta_sin_asignar'])
         st.metric(
             "Sin Asignar Total", 
             f"{consolidadas['total_sin_asignar']:,}",
@@ -372,7 +372,7 @@ def _mostrar_kpis_principales(consolidadas: dict, ccm: dict, prr: dict, tendenci
         )
     
     with col4:
-        balance_diario = consolidadas['produccion_total'] - consolidadas['ingresos_total']
+        balance_diario = float(consolidadas['produccion_total'] - consolidadas['ingresos_total'])
         st.metric(
             "Balance Diario", 
             f"{balance_diario:+.1f}",
@@ -599,11 +599,11 @@ def _mostrar_ingresos_vs_trabajados_lineal(df_ccm: pd.DataFrame, df_prr: pd.Data
     if not ccm_data.empty and not prr_data.empty:
         col1, col2 = st.columns(2)
         with col1:
-            balance_ccm = ccm_data['trabajados'].mean() - ccm_data['ingresos'].mean()
+            balance_ccm = float(ccm_data['trabajados'].mean() - ccm_data['ingresos'].mean())
             st.metric("Balance Promedio CCM", f"{balance_ccm:+.1f}", help="Trabajados - Ingresos promedio")
         
         with col2:
-            balance_prr = prr_data['trabajados'].mean() - prr_data['ingresos'].mean()
+            balance_prr = float(prr_data['trabajados'].mean() - prr_data['ingresos'].mean())
             st.metric("Balance Promedio PRR", f"{balance_prr:+.1f}", help="Trabajados - Ingresos promedio")
 
 def _calcular_datos_ingresos_trabajados(df: pd.DataFrame, proceso: str) -> pd.DataFrame:
