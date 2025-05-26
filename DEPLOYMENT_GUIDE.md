@@ -11,15 +11,26 @@
 
 ### 🔧 Cambios Principales:
 
-#### 1. **requirements.txt actualizado**
+#### 1. **requirements.txt actualizado para Python 3.12**
 ```txt
-streamlit==1.29.0
-pandas==2.1.4
-plotly==5.17.0
-openpyxl==3.1.2
-numpy==1.24.4
-pytz==2023.3
-xlsxwriter==3.1.9
+streamlit>=1.29.0
+pandas>=2.1.0
+plotly>=5.17.0
+openpyxl>=3.1.0
+numpy>=1.26.0
+pytz>=2023.3
+xlsxwriter>=3.1.0
+```
+
+**⚠️ Alternativa sin versiones (recomendado para Cloud):**
+```txt
+streamlit
+pandas
+plotly
+openpyxl
+numpy
+pytz
+xlsxwriter
 ```
 
 #### 2. **dashboard_ejecutivo.py optimizado**
@@ -65,8 +76,8 @@ git push origin main
 2. Conecta tu repositorio GitHub
 3. Configuración recomendada:
    - **Main file path**: `app.py`
-   - **Python version**: 3.9
-   - **Requirements file**: `requirements.txt`
+   - **Python version**: 3.12 (o 3.11)
+   - **Requirements file**: `requirements.txt` (o `requirements-cloud.txt` si hay problemas)
 
 ### 4. **Variables de Entorno (si necesarias)**
 En Advanced settings, agregar:
@@ -129,6 +140,20 @@ dashboard/
 
 ## 🐛 Troubleshooting Común
 
+### Error: "No solution found when resolving dependencies" / "numpy==1.24.4"
+**Problema**: Incompatibilidad entre numpy 1.24.4 y Python 3.12
+**Solución**: 
+1. Usar `requirements-cloud.txt` (sin versiones específicas)
+2. O actualizar `requirements.txt` con versiones compatibles:
+```txt
+numpy>=1.26.0  # Compatible con Python 3.12
+pandas>=2.1.0  # Compatible con numpy 1.26+
+```
+
+### Error: "ModuleNotFoundError: No module named 'distutils'"
+**Problema**: Python 3.12 removió `distutils`
+**Solución**: Usar versiones más recientes de todas las librerías
+
 ### Error: "Module not found"
 ```bash
 # Verificar estructura de archivos
@@ -154,12 +179,14 @@ python test_cloud_compatibility.py
 
 - [ ] ✅ Pruebas locales pasan (`test_cloud_compatibility.py`)
 - [ ] ✅ Archivos de datos están en `ARCHIVOS/`
-- [ ] ✅ requirements.txt actualizado
-- [ ] ✅ config.toml presente
+- [ ] ✅ requirements.txt actualizado (versiones compatibles con Python 3.12)
+- [ ] ✅ config.toml sin opciones obsoletas
 - [ ] ✅ Repositorio subido a GitHub
 - [ ] ✅ Sin datos sensibles en el repo
 - [ ] ✅ Archivos < 1GB total
 - [ ] ✅ Python modules importan correctamente
+- [ ] ✅ Versiones numpy >= 1.26.0 (para Python 3.12)
+- [ ] ✅ Backup: `requirements-cloud.txt` disponible
 
 ## 🎯 Resultado Esperado
 

@@ -1,0 +1,8 @@
+# Requirements optimizado para Streamlit Cloud (Python 3.12)
+streamlit
+pandas
+plotly
+openpyxl
+numpy
+pytz
+xlsxwriter 

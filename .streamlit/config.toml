@@ -9,17 +9,8 @@ gatherUsageStats = false
 [theme]
 base = "light"
 
-[runner]
-magicEnabled = true
-installTracer = false
-fixMatplotlib = true
-
 [logger]
 level = "error"
-
-[client]
-caching = true
-displayEnabled = true
 
 [global]
 developmentMode = false 
