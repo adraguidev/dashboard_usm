@@ -13,7 +13,8 @@ from modules.data.loader import (
     cargar_historico_pendientes
 )
 from modules.data.historico_sin_asignar import (
-    actualizar_historico_sin_asignar, calcular_tendencia_sin_asignar
+    actualizar_historico_sin_asignar, calcular_tendencia_sin_asignar,
+    cargar_historico_sin_asignar
 )
 
 def mostrar_dashboard_ejecutivo() -> None:
@@ -64,7 +65,12 @@ def mostrar_dashboard_ejecutivo() -> None:
     
     st.markdown("---")
     
-    # SECCIÓN 3: ANÁLISIS COMPARATIVO DE PROCESOS
+    # SECCIÓN 3: EVOLUCIÓN DE SIN ASIGNAR
+    _mostrar_evolucion_sin_asignar()
+    
+    st.markdown("---")
+    
+    # SECCIÓN 4: ANÁLISIS COMPARATIVO DE PROCESOS
     col_left2, col_right2 = st.columns(2)
     
     with col_left2:
@@ -89,9 +95,10 @@ def _calcular_metricas_exactas_ccm(df: pd.DataFrame) -> dict:
     total_pendientes = tabla_total + sin_asignar
     asignados = tabla_total
     
-    # Operadores activos (de la tabla, excluyendo 'Total')
+    # Operadores activos (de la tabla, excluyendo 'Total' y operadores con 0 pendientes)
     operadores_en_tabla = [idx for idx in tabla_pendientes.index if idx != 'Total']
-    operadores_activos = len(operadores_en_tabla)
+    # Solo contar operadores que realmente tienen casos asignados
+    operadores_activos = len([op for op in operadores_en_tabla if tabla_pendientes.loc[op, 'Total'] > 0])
     
     # === PRODUCCIÓN DIARIA (misma lógica que pestaña Producción Diaria) ===
     col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
@@ -157,9 +164,10 @@ def _calcular_metricas_exactas_prr(df: pd.DataFrame) -> dict:
     total_pendientes = tabla_total + sin_asignar
     asignados = tabla_total
     
-    # Operadores activos (de la tabla, excluyendo 'Total')
+    # Operadores activos (de la tabla, excluyendo 'Total' y operadores con 0 pendientes)
     operadores_en_tabla = [idx for idx in tabla_pendientes.index if idx != 'Total']
-    operadores_activos = len(operadores_en_tabla)
+    # Solo contar operadores que realmente tienen casos asignados
+    operadores_activos = len([op for op in operadores_en_tabla if tabla_pendientes.loc[op, 'Total'] > 0])
     
     # === PRODUCCIÓN DIARIA (misma lógica que pestaña Producción Diaria) ===
     col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
@@ -400,54 +408,71 @@ def _mostrar_evolucion_pendientes_historica() -> None:
         # Preparar datos del histórico para gráfico
         historico['Fecha'] = pd.to_datetime(historico['Fecha'])
         
+        # FILTRAR CASOS ANTIGUOS Y OPERADORES INACTIVOS
+        # Excluir registros de años "ANTIGUOS" que no representan carga actual
+        historico_filtrado = historico[historico['Año'] != 'ANTIGUOS'].copy()
+        
         # Últimos 60 días para ver tendencia
-        historico_reciente = historico[historico['Fecha'] >= (historico['Fecha'].max() - pd.Timedelta(days=60))]
+        historico_reciente = historico_filtrado[historico_filtrado['Fecha'] >= (historico_filtrado['Fecha'].max() - pd.Timedelta(days=60))]
         
         if not historico_reciente.empty:
             # Agrupar por fecha y proceso para mostrar totales
             totales_por_fecha = historico_reciente.groupby(['Fecha', 'Proceso'])['Pendientes'].sum().reset_index()
             
+            # FILTRAR VALORES 0 Y VALORES MUY PEQUEÑOS QUE NO SON REPRESENTATIVOS
+            # Solo mostrar si hay al menos 5 pendientes por proceso por día
+            totales_por_fecha = totales_por_fecha[totales_por_fecha['Pendientes'] >= 5].copy()
+            
             fig = go.Figure()
             
-            # Líneas por proceso (OMITIENDO VALORES 0)
+            # Líneas por proceso (SOLO VALORES SIGNIFICATIVOS)
             for proceso in ['CCM', 'PRR']:
-                datos_proceso = totales_por_fecha[totales_por_fecha['Proceso'] == proceso]
+                datos_proceso = totales_por_fecha[totales_por_fecha['Proceso'] == proceso].copy()
+                
                 if not datos_proceso.empty:
-                    # FILTRAR VALORES 0
-                    datos_filtrados = datos_proceso[datos_proceso['Pendientes'] > 0]
+                    datos_proceso = datos_proceso.sort_values('Fecha')
                     
-                    if not datos_filtrados.empty:
+                    # Verificar que hay datos significativos
+                    if len(datos_proceso) > 0:
                         fig.add_trace(go.Scatter(
-                            x=datos_filtrados['Fecha'],
-                            y=datos_filtrados['Pendientes'],
+                            x=datos_proceso['Fecha'],
+                            y=datos_proceso['Pendientes'],
                             mode='lines+markers',
                             name=f'{proceso} - Pendientes',
                             line=dict(width=3),
-                            text=[f"{v:,}" for v in datos_filtrados['Pendientes']],
-                            textposition="top center",
-                            connectgaps=True  # Conecta a través de valores omitidos
+                            marker=dict(size=6),
+                            connectgaps=False,
+                            hovertemplate=f'<b>{proceso}</b><br>Fecha: %{{x}}<br>Pendientes: %{{y:,}}<extra></extra>'
                         ))
             
-            # Total combinado (OMITIENDO VALORES 0)
-            totales_fecha = totales_por_fecha.groupby('Fecha')['Pendientes'].sum().reset_index()
-            totales_filtrados = totales_fecha[totales_fecha['Pendientes'] > 0]
+            # Total combinado (SOLO VALORES SIGNIFICATIVOS)
+            if not totales_por_fecha.empty:
+                totales_fecha = totales_por_fecha.groupby('Fecha')['Pendientes'].sum().reset_index()
+                # Filtrar totales muy pequeños
+                totales_fecha = totales_fecha[totales_fecha['Pendientes'] >= 10].copy()
+                totales_fecha = totales_fecha.sort_values('Fecha')
+                
+                if len(totales_fecha) > 0:
+                    fig.add_trace(go.Scatter(
+                        x=totales_fecha['Fecha'],
+                        y=totales_fecha['Pendientes'],
+                        mode='lines+markers',
+                        name='Total Combinado',
+                        line=dict(width=4, dash='dash', color='purple'),
+                        marker=dict(size=8, color='purple'),
+                        connectgaps=False,
+                        hovertemplate='<b>Total</b><br>Fecha: %{x}<br>Pendientes: %{y:,}<extra></extra>'
+                    ))
             
-            if not totales_filtrados.empty:
-                fig.add_trace(go.Scatter(
-                    x=totales_filtrados['Fecha'],
-                    y=totales_filtrados['Pendientes'],
-                    mode='lines+markers',
-                    name='Total Combinado',
-                    line=dict(width=4, dash='dash', color='purple'),
-                    text=[f"{v:,}" for v in totales_filtrados['Pendientes']],
-                    textposition="top center",
-                    connectgaps=True
-                ))
-            
+            # Configurar el eje Y para que NO incluya 0
             fig.update_layout(
-                title="Evolución de Pendientes (Últimos 60 días - Sin valores 0)",
+                title="Evolución de Pendientes (Últimos 60 días - Solo carga significativa)",
                 xaxis_title="Fecha",
                 yaxis_title="Total Pendientes",
+                yaxis=dict(
+                    rangemode='normal',  # CAMBIO: 'normal' en lugar de 'tozero' para NO forzar desde 0
+                    autorange=True
+                ),
                 hovermode='x unified',
                 height=400,
                 legend=dict(
@@ -456,14 +481,127 @@ def _mostrar_evolucion_pendientes_historica() -> None:
                     y=1.02,
                     xanchor="right",
                     x=1
-                )
+                ),
+                showlegend=True
             )
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Información sobre filtros aplicados
+            st.caption("📊 Se excluyen: casos ANTIGUOS, operadores con <5 pendientes por proceso, totales <10")
+            st.caption("🎯 Solo se muestran datos que representan carga de trabajo significativa")
         else:
             st.info("Datos históricos insuficientes para gráfico de tendencias")
     else:
         st.info("No hay datos históricos disponibles")
+
+def _mostrar_evolucion_sin_asignar() -> None:
+    """
+    Muestra gráfico de evolución de casos sin asignar usando histórico específico
+    """
+    st.subheader("📊 Evolución de Sin Asignar")
+    
+    # Cargar histórico de sin asignar
+    historico_sin_asignar = cargar_historico_sin_asignar()
+    
+    if not historico_sin_asignar.empty:
+        # Preparar datos
+        historico_sin_asignar['fecha'] = pd.to_datetime(historico_sin_asignar['fecha'])
+        
+        # Últimos 30 días para ver tendencia
+        historico_reciente = historico_sin_asignar[
+            historico_sin_asignar['fecha'] >= (historico_sin_asignar['fecha'].max() - pd.Timedelta(days=30))
+        ]
+        
+        if not historico_reciente.empty:
+            fig = go.Figure()
+            
+            # Líneas por proceso CON ETIQUETAS
+            for proceso in ['CCM', 'PRR']:
+                datos_proceso = historico_reciente[historico_reciente['proceso'] == proceso].copy()
+                
+                if not datos_proceso.empty:
+                    datos_proceso = datos_proceso.sort_values('fecha')
+                    
+                    fig.add_trace(go.Scatter(
+                        x=datos_proceso['fecha'],
+                        y=datos_proceso['sin_asignar'],
+                        mode='lines+markers+text',
+                        name=f'{proceso} - Sin Asignar',
+                        line=dict(width=3),
+                        marker=dict(size=6),
+                        text=[str(v) for v in datos_proceso['sin_asignar']],
+                        textposition="top center",
+                        textfont=dict(size=10),
+                        hovertemplate=f'<b>{proceso}</b><br>Fecha: %{{x}}<br>Sin Asignar: %{{y:,}}<extra></extra>'
+                    ))
+            
+            # Total combinado CON ETIQUETAS
+            if len(historico_reciente['proceso'].unique()) > 1:
+                totales_fecha = historico_reciente.groupby('fecha')['sin_asignar'].sum().reset_index()
+                totales_fecha = totales_fecha.sort_values('fecha')
+                
+                fig.add_trace(go.Scatter(
+                    x=totales_fecha['fecha'],
+                    y=totales_fecha['sin_asignar'],
+                    mode='lines+markers+text',
+                    name='Total Sin Asignar',
+                    line=dict(width=4, dash='dash', color='red'),
+                    marker=dict(size=8, color='red'),
+                    text=[str(v) for v in totales_fecha['sin_asignar']],
+                    textposition="top center",
+                    textfont=dict(size=11, color='red'),
+                    hovertemplate='<b>Total</b><br>Fecha: %{x}<br>Sin Asignar: %{y:,}<extra></extra>'
+                ))
+            
+            # Configurar layout MÁS COMPACTO
+            fig.update_layout(
+                title="Evolución de Casos Sin Asignar",
+                xaxis_title="Fecha",
+                yaxis_title="Sin Asignar",
+                yaxis=dict(rangemode='tozero'),
+                hovermode='x unified',
+                height=280,  # MÁS PEQUEÑO
+                margin=dict(l=50, r=50, t=50, b=50),  # MÁRGENES REDUCIDOS
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5
+                ),
+                showlegend=True
+            )
+            
+            # FORMATO DE FECHAS SIN HORAS
+            fig.update_xaxes(
+                tickformat="%d/%m",  # Solo día/mes
+                tickangle=0,
+                dtick="D1"  # Un tick por día
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar último registro en UNA SOLA FILA
+            ultimo_registro = historico_reciente.groupby('proceso')['sin_asignar'].last()
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if 'CCM' in ultimo_registro:
+                    st.metric("CCM Actual", f"{ultimo_registro['CCM']:,}")
+            
+            with col2:
+                if 'PRR' in ultimo_registro:
+                    st.metric("PRR Actual", f"{ultimo_registro['PRR']:,}")
+            
+            with col3:
+                total_actual = ultimo_registro.sum()
+                st.metric("Total Actual", f"{total_actual:,}")
+                
+        else:
+            st.info("Datos históricos de sin asignar insuficientes para gráfico")
+    else:
+        st.info("No hay histórico de sin asignar disponible")
 
 def _mostrar_panel_control_estado(consolidadas: dict, ccm: dict, prr: dict) -> None:
     """
