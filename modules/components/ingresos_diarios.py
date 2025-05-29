@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
+from modules.utils.excel_export import to_excel_matriz
 
 def mostrar_ingresos_diarios(df: pd.DataFrame, proceso: str) -> None:
     """
@@ -20,6 +21,7 @@ def mostrar_ingresos_diarios(df: pd.DataFrame, proceso: str) -> None:
     
     # Determinar columna de fecha
     col_fecha_ing = 'FechaExpendiente'
+    col_fecha_egr = 'FechaPre'
     col_tramite_ing = 'NumeroTramite'
     
     if col_fecha_ing not in df.columns:
@@ -28,6 +30,8 @@ def mostrar_ingresos_diarios(df: pd.DataFrame, proceso: str) -> None:
     
     # Asegurar tipo datetime
     df[col_fecha_ing] = pd.to_datetime(df[col_fecha_ing], errors='coerce')
+    if col_fecha_egr in df.columns:
+        df[col_fecha_egr] = pd.to_datetime(df[col_fecha_egr], errors='coerce')
     
     # Mostrar gráfico principal de ingresos
     _mostrar_grafico_ingresos_principales(df, col_fecha_ing, col_tramite_ing)
@@ -37,6 +41,9 @@ def mostrar_ingresos_diarios(df: pd.DataFrame, proceso: str) -> None:
     
     # Mostrar promedio semanal
     _mostrar_promedio_semanal(df, col_fecha_ing, col_tramite_ing)
+    
+    # Nueva sección: Cuadros mensuales con descarga (al final)
+    _mostrar_cuadros_mensuales(df, col_fecha_ing, col_fecha_egr, col_tramite_ing, proceso)
 
 def _mostrar_grafico_ingresos_principales(df: pd.DataFrame, col_fecha_ing: str, 
                                         col_tramite_ing: str) -> None:
@@ -194,4 +201,131 @@ def _mostrar_promedio_semanal(df: pd.DataFrame, col_fecha_ing: str,
     # Explicación
     st.write("""**¿Qué muestra este gráfico?**
 - Permite ver si el tiempo promedio para pretrabajar un expediente ha mejorado o empeorado a lo largo del año.
-- Una tendencia descendente indica mayor eficiencia; una ascendente, posibles cuellos de botella o sobrecarga.""") 
+- Una tendencia descendente indica mayor eficiencia; una ascendente, posibles cuellos de botella o sobrecarga.""")
+
+def _mostrar_cuadros_mensuales(df: pd.DataFrame, col_fecha_ing: str, col_fecha_egr: str, 
+                              col_tramite_ing: str, proceso: str) -> None:
+    """
+    Muestra la sección de cuadros mensuales con opción de descarga
+    """
+    st.write("#### 📊 Cuadros Mensuales de Ingresos y Egresos")
+    
+    # Obtener meses disponibles
+    df_temp = df.copy()
+    df_temp[col_fecha_ing] = pd.to_datetime(df_temp[col_fecha_ing], errors='coerce')
+    df_temp['AñoMes'] = df_temp[col_fecha_ing].dt.to_period('M')
+    meses_disponibles = sorted(df_temp['AñoMes'].dropna().unique(), reverse=True)
+    meses_disponibles_str = [str(m) for m in meses_disponibles[:12]]  # Últimos 12 meses
+    
+    # Selector de mes
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        mes_seleccionado = st.selectbox(
+            "Seleccionar mes para generar cuadro:",
+            options=meses_disponibles_str,
+            index=0 if meses_disponibles_str else None
+        )
+    
+    if not mes_seleccionado:
+        st.warning("No hay datos disponibles para generar cuadros.")
+        return
+    
+    # Crear cuadro mensual
+    cuadro_mensual = _crear_cuadro_mensual(df, mes_seleccionado, col_fecha_ing, col_fecha_egr, col_tramite_ing)
+    
+    if cuadro_mensual.empty:
+        st.warning(f"No hay datos disponibles para {mes_seleccionado}.")
+        return
+    
+    # Mostrar métricas resumen
+    total_ingresos = cuadro_mensual['Ingresos'].sum()
+    total_egresos = cuadro_mensual['Egresos'].sum()
+    saldo_neto = total_ingresos - total_egresos
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📥 Total Ingresos", f"{total_ingresos:,}")
+    with col2:
+        st.metric("📤 Total Egresos", f"{total_egresos:,}")
+    with col3:
+        st.metric("📊 Saldo Neto", f"{saldo_neto:,}")
+    with col4:
+        color = "🟢" if saldo_neto >= 0 else "🔴"
+        st.metric("📈 Tendencia", f"{color}")
+    
+    # Mostrar tabla
+    st.dataframe(cuadro_mensual, use_container_width=True, height=400)
+    
+    # Botón de descarga
+    with col2:
+        excel_data = to_excel_matriz(cuadro_mensual)
+        st.download_button(
+            label=f"📥 Descargar {mes_seleccionado}.xlsx",
+            data=excel_data,
+            file_name=f"cuadro_ingresos_egresos_{proceso}_{mes_seleccionado}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+def _crear_cuadro_mensual(df: pd.DataFrame, mes_seleccionado: str, col_fecha_ing: str, 
+                         col_fecha_egr: str, col_tramite_ing: str) -> pd.DataFrame:
+    """
+    Crea el cuadro mensual con fecha, ingresos y egresos
+    """
+    # Convertir mes seleccionado a periodo
+    periodo = pd.Period(mes_seleccionado)
+    fecha_inicio = periodo.start_time
+    fecha_fin = periodo.end_time
+    
+    # Crear rango de fechas completo del mes
+    fechas_mes = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
+    cuadro_base = pd.DataFrame({'Fecha': fechas_mes})
+    
+    # Calcular ingresos diarios (por FechaExpendiente)
+    df_ingresos = df.copy()
+    df_ingresos[col_fecha_ing] = pd.to_datetime(df_ingresos[col_fecha_ing], errors='coerce')
+    ingresos_diarios = df_ingresos[
+        (df_ingresos[col_fecha_ing] >= fecha_inicio) & 
+        (df_ingresos[col_fecha_ing] <= fecha_fin)
+    ].groupby(col_fecha_ing)[col_tramite_ing].count().reset_index()
+    ingresos_diarios = ingresos_diarios.rename(columns={col_fecha_ing: 'Fecha', col_tramite_ing: 'Ingresos'})
+    
+    # Calcular egresos diarios (por FechaPre)
+    egresos_diarios = pd.DataFrame({'Fecha': fechas_mes, 'Egresos': 0})
+    if col_fecha_egr in df.columns:
+        df_egresos = df.copy()
+        df_egresos[col_fecha_egr] = pd.to_datetime(df_egresos[col_fecha_egr], errors='coerce')
+        egresos_temp = df_egresos[
+            (df_egresos[col_fecha_egr] >= fecha_inicio) & 
+            (df_egresos[col_fecha_egr] <= fecha_fin)
+        ].groupby(col_fecha_egr)[col_tramite_ing].count().reset_index()
+        egresos_temp = egresos_temp.rename(columns={col_fecha_egr: 'Fecha', col_tramite_ing: 'Egresos'})
+        egresos_diarios = cuadro_base.merge(egresos_temp, on='Fecha', how='left')
+        egresos_diarios['Egresos'] = egresos_diarios['Egresos'].fillna(0)
+    
+    # Combinar ingresos y egresos
+    cuadro_mensual = cuadro_base.merge(ingresos_diarios, on='Fecha', how='left')
+    cuadro_mensual = cuadro_mensual.merge(egresos_diarios[['Fecha', 'Egresos']], on='Fecha', how='left')
+    
+    # Llenar valores faltantes con 0
+    cuadro_mensual['Ingresos'] = cuadro_mensual['Ingresos'].fillna(0).astype(int)
+    cuadro_mensual['Egresos'] = cuadro_mensual['Egresos'].fillna(0).astype(int)
+    
+    # Calcular saldo diario y acumulado
+    cuadro_mensual['Saldo_Diario'] = cuadro_mensual['Ingresos'] - cuadro_mensual['Egresos']
+    cuadro_mensual['Saldo_Acumulado'] = cuadro_mensual['Saldo_Diario'].cumsum()
+    
+    # Formatear fecha para visualización
+    cuadro_mensual['Fecha'] = cuadro_mensual['Fecha'].dt.strftime('%d/%m/%Y')
+    
+    # Añadir día de la semana con nombres en español
+    dias_semana = {
+        0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 
+        4: 'Viernes', 5: 'Sábado', 6: 'Domingo'
+    }
+    fechas_dt = pd.to_datetime(cuadro_mensual['Fecha'], format='%d/%m/%Y')
+    cuadro_mensual['Día'] = fechas_dt.dt.dayofweek.map(dias_semana)
+    
+    # Reordenar columnas
+    cuadro_mensual = cuadro_mensual[['Fecha', 'Día', 'Ingresos', 'Egresos', 'Saldo_Diario', 'Saldo_Acumulado']]
+    
+    return cuadro_mensual 

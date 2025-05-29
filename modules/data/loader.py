@@ -109,36 +109,97 @@ def procesar_pendientes(df: pd.DataFrame, proceso: str) -> pd.DataFrame:
     
     return df_filtrado
 
-def crear_tabla_pendientes(df_filtrado: pd.DataFrame, proceso: str) -> pd.DataFrame:
+def crear_tabla_pendientes(df_filtrado: pd.DataFrame, proceso: str, agrupacion: str = "anios") -> pd.DataFrame:
     """
     Crea la tabla dinámica de pendientes
     
     Args:
         df_filtrado: DataFrame filtrado con pendientes
         proceso: Tipo de proceso ('CCM' o 'PRR')
+        agrupacion: Tipo de agrupación ('anios', 'trimestres', 'meses')
         
     Returns:
-        Tabla dinámica de pendientes por operador y año
+        Tabla dinámica de pendientes por operador y período
     """
+    df_filtrado = df_filtrado.copy()
+    
+    # Usar columnas existentes o crear nuevas según la agrupación
+    if agrupacion == "anios":
+        # Usar columna 'Anio' existente
+        if 'Anio' not in df_filtrado.columns:
+            raise ValueError("La columna 'Anio' no está disponible en los datos")
+        col_name = 'Anio'
+        
+    elif agrupacion == "meses":
+        # Combinar año y mes para crear etiquetas descriptivas como "2023-01", "2024-02"
+        if 'Mes' not in df_filtrado.columns or 'Anio' not in df_filtrado.columns:
+            raise ValueError("Las columnas 'Mes' y 'Anio' son requeridas para agrupar por meses")
+        
+        # Crear columna combinada Año-Mes
+        df_filtrado['Mes'] = df_filtrado['Mes'].astype(str).str.zfill(2)  # Asegurar formato 01, 02, etc.
+        df_filtrado['AnioMes'] = df_filtrado['Anio'].astype(str) + '-' + df_filtrado['Mes']
+        col_name = 'AnioMes'
+        
+    else:  # trimestres
+        # Para trimestres necesitamos crear la columna usando FechaExpendiente
+        if 'FechaExpendiente' not in df_filtrado.columns:
+            raise ValueError("La columna 'FechaExpendiente' es requerida para agrupar por trimestres")
+        
+        # Convertir a datetime si no lo está
+        df_filtrado['FechaExpendiente'] = pd.to_datetime(df_filtrado['FechaExpendiente'], errors='coerce')
+        
+        # Crear columna de trimestre
+        df_filtrado['Trimestre'] = (
+            df_filtrado['FechaExpendiente'].dt.year.astype(str) + 
+            "-T" + 
+            df_filtrado['FechaExpendiente'].dt.quarter.astype(str)
+        )
+        col_name = 'Trimestre'
+    
     # Crear tabla dinámica sin totales automáticos
     tabla = pd.pivot_table(
         df_filtrado,
         index='OPERADOR',
-        columns='Anio',
+        columns=col_name,
         values='NumeroTramite',
         aggfunc='count',
-        fill_value=0
+        fill_value=0,
+        observed=False  # Para evitar warnings de pandas
     )
     
     # Calcular columna Total manualmente
     tabla['Total'] = tabla.sum(axis=1)
     
-    # Excluir operadores específicos
+    # Aplicar filtros de operadores según el proceso (insensible a mayúsculas/minúsculas)
     if proceso == "CCM":
-        operadores_excluir = ["MAURICIO ROMERO, HUGO", "Sin asignar"]
-        tabla = tabla.drop(operadores_excluir, errors='ignore')
+        # Excluir operadores específicos para CCM
+        operadores_excluir_nombres = [
+            "MAURICIO ROMERO, HUGO", 
+            "Sin asignar",
+            "Aponte Sanchez, Paola Lita",
+            "Lucero Martinez, Carlos Martin", 
+            "USUARIO DE AGENCIA DIGITAL"
+        ]
+        
     elif proceso == "PRR":
-        tabla = tabla.drop(["Sin asignar"], errors='ignore')
+        # Excluir operadores específicos para PRR
+        operadores_excluir_nombres = [
+            "Sin asignar",
+            "Aponte Sanchez, Paola Lita",
+            "Lucero Martinez, Carlos Martin", 
+            "USUARIO DE AGENCIA DIGITAL"
+        ]
+    
+    # Filtrar operadores de forma insensible a mayúsculas/minúsculas
+    operadores_excluir_lower = [op.lower() for op in operadores_excluir_nombres]
+    indices_a_excluir = [
+        idx for idx in tabla.index 
+        if idx.lower() in operadores_excluir_lower
+    ]
+    tabla = tabla.drop(indices_a_excluir, errors='ignore')
+    
+    # Filtrar operadores con menos de 1 pendiente total
+    tabla = tabla[tabla['Total'] >= 1]
     
     # Ordenar por Total descendente
     tabla = tabla.sort_values(by=('Total'), ascending=False)
@@ -150,23 +211,63 @@ def crear_tabla_pendientes(df_filtrado: pd.DataFrame, proceso: str) -> pd.DataFr
     
     return tabla
 
-def calcular_sin_asignar(df_filtrado: pd.DataFrame) -> int:
+def calcular_sin_asignar(df_filtrado: pd.DataFrame, agrupacion: str = "anios") -> int:
     """
-    Calcula el total de casos sin asignar en los últimos 2 años
+    Calcula el total de casos sin asignar según el tipo de agrupación
     
     Args:
         df_filtrado: DataFrame filtrado con pendientes
+        agrupacion: Tipo de agrupación ('anios', 'trimestres', 'meses')
         
     Returns:
-        Número de casos sin asignar
+        Número de casos sin asignar en el período correspondiente
     """
-    anios = sorted(df_filtrado['Anio'].dropna().unique())
-    ultimos_2_anios = anios[-2:] if len(anios) >= 2 else anios
+    # Filtrar solo casos sin asignar
+    sin_asignar_df = df_filtrado[df_filtrado['OPERADOR'] == 'Sin asignar'].copy()
     
-    return df_filtrado[
-        (df_filtrado['OPERADOR'] == 'Sin asignar') &
-        (df_filtrado['Anio'].isin(ultimos_2_anios))
-    ]['NumeroTramite'].count()
+    if sin_asignar_df.empty:
+        return 0
+    
+    # Filtrar según el tipo de agrupación
+    if agrupacion == "anios":
+        # Usar columna 'Anio' existente - últimos 2 años
+        if 'Anio' not in sin_asignar_df.columns:
+            return 0
+        anios = sorted(sin_asignar_df['Anio'].dropna().unique())
+        ultimos_periodos = anios[-2:] if len(anios) >= 2 else anios
+        mask = sin_asignar_df['Anio'].isin(ultimos_periodos)
+        
+    elif agrupacion == "meses":
+        # Usar columnas 'Mes' y 'Anio' combinadas - últimos 12 meses
+        if 'Mes' not in sin_asignar_df.columns or 'Anio' not in sin_asignar_df.columns:
+            return 0
+        
+        # Crear columna combinada igual que en crear_tabla_pendientes
+        sin_asignar_df['Mes'] = sin_asignar_df['Mes'].astype(str).str.zfill(2)
+        sin_asignar_df['AnioMes'] = sin_asignar_df['Anio'].astype(str) + '-' + sin_asignar_df['Mes']
+        meses = sorted(sin_asignar_df['AnioMes'].dropna().unique())
+        ultimos_periodos = meses[-12:] if len(meses) >= 12 else meses
+        mask = sin_asignar_df['AnioMes'].isin(ultimos_periodos)
+        
+    else:  # trimestres
+        # Para trimestres crear la columna usando FechaExpendiente - últimos 6 trimestres
+        if 'FechaExpendiente' not in sin_asignar_df.columns:
+            return 0
+        
+        # Convertir fecha si no lo está
+        sin_asignar_df['FechaExpendiente'] = pd.to_datetime(sin_asignar_df['FechaExpendiente'], errors='coerce')
+        
+        # Crear columna de trimestre
+        sin_asignar_df['Trimestre'] = (
+            sin_asignar_df['FechaExpendiente'].dt.year.astype(str) + 
+            "-T" + 
+            sin_asignar_df['FechaExpendiente'].dt.quarter.astype(str)
+        )
+        trimestres = sorted(sin_asignar_df['Trimestre'].dropna().unique())
+        ultimos_periodos = trimestres[-6:] if len(trimestres) >= 6 else trimestres
+        mask = sin_asignar_df['Trimestre'].isin(ultimos_periodos)
+    
+    return sin_asignar_df[mask]['NumeroTramite'].count()
 
 def cargar_historico_pendientes() -> pd.DataFrame:
     """

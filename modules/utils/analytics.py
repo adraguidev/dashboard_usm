@@ -168,8 +168,28 @@ def preparar_tabla_operadores_periodo(tabla_operadores: pd.DataFrame, periodo_se
         )
     
     tabla_operadores_periodo = tabla_operadores[['OPERADOR'] + cols_periodo.tolist()]
+    
+    # Aplicar los mismos filtros de operadores que en pendientes
+    # Excluir operadores específicos (usando filtro común para ambos procesos)
+    operadores_excluir_nombres = [
+        "MAURICIO ROMERO, HUGO", 
+        "Sin asignar",
+        "Aponte Sanchez, Paola Lita",
+        "Lucero Martinez, Carlos Martin", 
+        "USUARIO DE AGENCIA DIGITAL"
+    ]
+    
+    # Filtrar operadores de forma insensible a mayúsculas/minúsculas
+    operadores_excluir_lower = [op.lower() for op in operadores_excluir_nombres]
+    indices_a_excluir = [
+        idx for idx in tabla_operadores_periodo.index 
+        if tabla_operadores_periodo.loc[idx, 'OPERADOR'].lower() in operadores_excluir_lower
+    ]
+    tabla_operadores_periodo = tabla_operadores_periodo.drop(indices_a_excluir, errors='ignore')
+    
+    # Cambiar filtro a mínimo 1 pendiente (en lugar de 5)
     tabla_operadores_filtrada = tabla_operadores_periodo[
-        tabla_operadores_periodo[cols_periodo[-1]] >= 5
+        tabla_operadores_periodo[cols_periodo[-1]] >= 1
     ]
     
     # Realizar el melt con la estructura correcta

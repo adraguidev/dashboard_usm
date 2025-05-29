@@ -122,6 +122,47 @@ def _crear_matriz_evolucion(df_filtro: pd.DataFrame) -> pd.DataFrame:
         fill_value=0
     )
     
+    # Aplicar los mismos filtros de operadores que en la tabla de pendientes
+    # Determinar el proceso desde el df_filtro si está disponible
+    proceso = df_filtro['Proceso'].iloc[0] if 'Proceso' in df_filtro.columns and not df_filtro.empty else "CCM"
+    
+    # Aplicar filtros de operadores según el proceso (insensible a mayúsculas/minúsculas)
+    if proceso == "CCM":
+        # Excluir operadores específicos para CCM
+        operadores_excluir_nombres = [
+            "MAURICIO ROMERO, HUGO", 
+            "Sin asignar",
+            "Aponte Sanchez, Paola Lita",
+            "Lucero Martinez, Carlos Martin", 
+            "USUARIO DE AGENCIA DIGITAL"
+        ]
+        
+    elif proceso == "PRR":
+        # Excluir operadores específicos para PRR
+        operadores_excluir_nombres = [
+            "Sin asignar",
+            "Aponte Sanchez, Paola Lita",
+            "Lucero Martinez, Carlos Martin", 
+            "USUARIO DE AGENCIA DIGITAL"
+        ]
+    else:
+        # Por defecto, excluir operadores comunes
+        operadores_excluir_nombres = [
+            "MAURICIO ROMERO, HUGO", 
+            "Sin asignar",
+            "Aponte Sanchez, Paola Lita",
+            "Lucero Martinez, Carlos Martin", 
+            "USUARIO DE AGENCIA DIGITAL"
+        ]
+    
+    # Filtrar operadores de forma insensible a mayúsculas/minúsculas
+    operadores_excluir_lower = [op.lower() for op in operadores_excluir_nombres]
+    indices_a_excluir = [
+        idx for idx in tabla_matriz.index 
+        if idx.lower() in operadores_excluir_lower
+    ]
+    tabla_matriz = tabla_matriz.drop(indices_a_excluir, errors='ignore')
+    
     # Ordenar columnas por fecha
     tabla_matriz = tabla_matriz.reindex(sorted(tabla_matriz.columns), axis=1)
     
