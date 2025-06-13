@@ -5,7 +5,7 @@ Aplicación principal de Streamlit
 
 import streamlit as st
 from modules.data.loader import cargar_datos, obtener_archivos_proceso
-from modules.components.dashboard_ejecutivo import mostrar_dashboard_ejecutivo
+from modules.components.dashboard_ejecutivo_main import mostrar_dashboard_ejecutivo
 from modules.components.pendientes import mostrar_pendientes
 from modules.components.produccion_diaria import mostrar_produccion_diaria
 from modules.components.ingresos_diarios import mostrar_ingresos_diarios

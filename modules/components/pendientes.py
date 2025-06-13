@@ -29,6 +29,13 @@ def aplicar_filtros_tabla(tabla: pd.DataFrame, modo_vista: str, regimen_filtro: 
     """
     tabla_filtrada = tabla.copy()
     
+    # PRESERVAR la fila 'Total' antes de aplicar filtros
+    fila_total = None
+    if 'Total' in tabla_filtrada.index:
+        fila_total = tabla_filtrada.loc[['Total']].copy()
+        # Remover temporalmente la fila Total para aplicar filtros
+        tabla_filtrada = tabla_filtrada.drop('Total', errors='ignore')
+    
     # Aplicar filtro principal según el modo de vista
     if modo_vista == "GENERAL":
         # Mostrar solo evaluadores que están en la base (no son "OTROS")
@@ -58,6 +65,68 @@ def aplicar_filtros_tabla(tabla: pd.DataFrame, modo_vista: str, regimen_filtro: 
             
         if subequipo_filtro != "Todos" and subequipo_filtro in tabla_filtrada['SUB-EQUIPO'].values:
             tabla_filtrada = tabla_filtrada[tabla_filtrada['SUB-EQUIPO'] == subequipo_filtro]
+    
+    # RECALCULAR la fila 'Total' basada en los datos filtrados
+    if fila_total is not None and not tabla_filtrada.empty:
+        # Obtener solo las columnas numéricas (años/períodos)
+        columnas_numericas = [col for col in tabla_filtrada.columns 
+                             if col not in ['REGIMEN', 'TURNO', 'MODALIDAD', 'SUB-EQUIPO']]
+        
+        # Calcular nuevos totales basados en los operadores filtrados
+        nueva_fila_total = tabla_filtrada[columnas_numericas].sum(axis=0)
+        nueva_fila_total.name = 'Total'
+        
+        # FILTRAR COLUMNAS CON TOTAL 0 - No mostrar períodos sin pendientes
+        columnas_con_datos = []
+        columnas_clasificacion = ['REGIMEN', 'TURNO', 'MODALIDAD', 'SUB-EQUIPO']
+        
+        for col in columnas_numericas:
+            if nueva_fila_total[col] > 0:  # Solo mantener columnas con pendientes
+                columnas_con_datos.append(col)
+        
+        # Si no hay columnas con datos, mantener al menos una para mostrar estructura
+        if not columnas_con_datos and columnas_numericas:
+            columnas_con_datos = [columnas_numericas[-1]]  # Mantener la última columna
+        
+        # Filtrar tabla para mostrar solo columnas con datos + columnas de clasificación
+        columnas_a_mostrar = [col for col in columnas_clasificacion if col in tabla_filtrada.columns] + columnas_con_datos
+        tabla_filtrada = tabla_filtrada[columnas_a_mostrar]
+        
+        # Recalcular totales solo para las columnas que se van a mostrar
+        nueva_fila_total_filtrada = tabla_filtrada[columnas_con_datos].sum(axis=0)
+        nueva_fila_total_filtrada.name = 'Total'
+        
+        # Crear DataFrame con la nueva fila total
+        nueva_fila_total_df = pd.DataFrame([nueva_fila_total_filtrada])
+        
+        # Agregar las columnas de clasificación con valores apropiados para Total
+        for col in columnas_clasificacion:
+            if col in tabla_filtrada.columns:
+                nueva_fila_total_df[col] = 'TOTAL'
+        
+        # Reordenar columnas para que las de clasificación estén primero
+        columnas_ordenadas = [col for col in columnas_clasificacion if col in nueva_fila_total_df.columns] + columnas_con_datos
+        nueva_fila_total_df = nueva_fila_total_df[columnas_ordenadas]
+        
+        # Concatenar la tabla filtrada con la nueva fila total
+        tabla_filtrada = pd.concat([tabla_filtrada, nueva_fila_total_df])
+    
+    elif fila_total is not None and tabla_filtrada.empty:
+        # Si no hay datos filtrados, mostrar estructura mínima con la última columna
+        columnas_numericas = [col for col in fila_total.columns 
+                             if col not in ['REGIMEN', 'TURNO', 'MODALIDAD', 'SUB-EQUIPO']]
+        
+        # Mantener solo las columnas de clasificación y la última columna numérica
+        columnas_minimas = [col for col in ['REGIMEN', 'TURNO', 'MODALIDAD', 'SUB-EQUIPO'] if col in fila_total.columns]
+        if columnas_numericas:
+            columnas_minimas.append(columnas_numericas[-1])
+        
+        fila_total_ceros = fila_total[columnas_minimas].copy()
+        for col in columnas_numericas:
+            if col in fila_total_ceros.columns:
+                fila_total_ceros.loc['Total', col] = 0
+        
+        tabla_filtrada = fila_total_ceros
     
     return tabla_filtrada
 
