@@ -1,0 +1,24 @@
+# Archivos temporales de Excel
+~$*
+*.tmp
+
+# Archivos de caché de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración local
+.env
+.env.local
+
+# Logs
+*.log 

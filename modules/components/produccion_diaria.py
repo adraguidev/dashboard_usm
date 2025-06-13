@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
 from modules.utils.excel_export import to_excel_with_format_prod, to_excel_with_format_weekend, to_excel_resumen
+from modules.data.loader import cargar_base_evaluadores
 
 def mostrar_produccion_diaria(df: pd.DataFrame, proceso: str) -> None:
     """
@@ -17,6 +18,16 @@ def mostrar_produccion_diaria(df: pd.DataFrame, proceso: str) -> None:
         proceso: Tipo de proceso ('CCM' o 'PRR')
     """
     st.header("Producción Diaria")
+    
+    # Cargar base de evaluadores para colores
+    try:
+        base_evaluadores = cargar_base_evaluadores(proceso)
+    except:
+        base_evaluadores = pd.DataFrame()  # DataFrame vacío si hay error
+    
+    # Mostrar leyenda de colores
+    _mostrar_leyenda_colores(base_evaluadores)
+    st.markdown("---")
     
     # Determinar columnas según disponibilidad
     col_operador = 'OperadorPre' if 'OperadorPre' in df.columns else 'OPERADOR'
@@ -37,8 +48,11 @@ def mostrar_produccion_diaria(df: pd.DataFrame, proceso: str) -> None:
     # Filtrar y procesar tabla
     tabla_filtrada_corr = _filtrar_tabla_produccion(tabla_prod)
     
+    # Aplicar colores a la tabla
+    tabla_styled = _aplicar_colores_tabla(tabla_filtrada_corr, base_evaluadores)
+    
     # Mostrar tabla
-    st.dataframe(tabla_filtrada_corr, use_container_width=True, height=500)
+    st.dataframe(tabla_styled, use_container_width=True, height=500)
     
     # Botón de descarga
     excel_data_prod = to_excel_with_format_prod(tabla_filtrada_corr)
@@ -50,7 +64,7 @@ def mostrar_produccion_diaria(df: pd.DataFrame, proceso: str) -> None:
     )
     
     # Tabla de fines de semana
-    _mostrar_tabla_fines_semana(df, col_operador, col_fecha, col_tramite, proceso)
+    _mostrar_tabla_fines_semana(df, col_operador, col_fecha, col_tramite, proceso, base_evaluadores)
     
     # Resumen diario
     _mostrar_resumen_diario(df_20dias, col_operador, col_fecha, col_tramite, proceso)
@@ -118,7 +132,7 @@ def _filtrar_tabla_produccion(tabla_prod: pd.DataFrame) -> pd.DataFrame:
     return tabla_filtrada_corr
 
 def _mostrar_tabla_fines_semana(df: pd.DataFrame, col_operador: str, col_fecha: str, 
-                               col_tramite: str, proceso: str) -> None:
+                               col_tramite: str, proceso: str, base_evaluadores: pd.DataFrame) -> None:
     """
     Muestra la tabla de producción de fines de semana
     """
@@ -182,7 +196,10 @@ def _mostrar_tabla_fines_semana(df: pd.DataFrame, col_operador: str, col_fecha: 
     else:
         tabla_weekend_filtrada_corr = tabla_weekend_filtrada_corr.sort_values(by='Total', ascending=False)
 
-    st.dataframe(tabla_weekend_filtrada_corr, use_container_width=True, height=400)
+    # Aplicar colores a la tabla de fines de semana
+    tabla_weekend_styled = _aplicar_colores_tabla(tabla_weekend_filtrada_corr, base_evaluadores)
+
+    st.dataframe(tabla_weekend_styled, use_container_width=True, height=400)
     
     # Botón de descarga
     excel_data_weekend = to_excel_with_format_weekend(tabla_weekend_filtrada_corr)
@@ -399,4 +416,102 @@ def _crear_grafico_total_tramites(resumen: pd.DataFrame) -> None:
         legend_title='Métrica',
         hovermode='x unified'
     )
-    st.plotly_chart(fig_total, use_container_width=True) 
+    st.plotly_chart(fig_total, use_container_width=True)
+
+def _obtener_color_evaluador(operador: str, base_evaluadores: pd.DataFrame) -> str:
+    """
+    Determina el color del evaluador según su clasificación
+    """
+    if base_evaluadores.empty:
+        return "#9e9e9e"  # Gris para inactivos si no hay base
+    
+    evaluador_info = base_evaluadores[base_evaluadores['OPERADOR'] == operador]
+    
+    if evaluador_info.empty:
+        return "#9e9e9e"  # Gris para inactivos (no están en la base)
+    
+    sub_equipo = evaluador_info['SUB-EQUIPO'].iloc[0]
+    
+    if sub_equipo == "RESPONSABLE":
+        return "#4caf50"  # Verde
+    elif sub_equipo == "REASIGNADOS":  
+        return "#ff9800"  # Naranja
+    else:
+        return "white"  # Blanco para otros sub-equipos activos
+
+def _mostrar_leyenda_colores(base_evaluadores: pd.DataFrame) -> None:
+    """
+    Muestra la leyenda de colores para los evaluadores
+    """
+    st.markdown("### 📋 Leyenda de Colores")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(
+            '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+            '<div style="width: 20px; height: 20px; background-color: #4caf50; '
+            'border-radius: 3px; margin-right: 10px;"></div>'
+            '<span><strong>Verde:</strong> RESPONSABLE</span>'
+            '</div>', 
+            unsafe_allow_html=True
+        )
+    
+    with col2:
+        st.markdown(
+            '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+            '<div style="width: 20px; height: 20px; background-color: #ff9800; '
+            'border-radius: 3px; margin-right: 10px;"></div>'
+            '<span><strong>Naranja:</strong> REASIGNADOS</span>'
+            '</div>', 
+            unsafe_allow_html=True
+        )
+    
+    with col3:
+        st.markdown(
+            '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+            '<div style="width: 20px; height: 20px; background-color: white; '
+            'border: 1px solid #ccc; border-radius: 3px; margin-right: 10px;"></div>'
+            '<span><strong>Blanco:</strong> OTROS ACTIVOS</span>'
+            '</div>', 
+            unsafe_allow_html=True
+        )
+    
+    with col4:
+        st.markdown(
+            '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+            '<div style="width: 20px; height: 20px; background-color: #9e9e9e; '
+            'border-radius: 3px; margin-right: 10px;"></div>'
+            '<span><strong>Gris:</strong> INACTIVOS</span>'
+            '</div>', 
+            unsafe_allow_html=True
+        )
+
+def _aplicar_colores_tabla(tabla: pd.DataFrame, base_evaluadores: pd.DataFrame):
+    """
+    Aplica colores a las filas de la tabla según la clasificación de evaluadores
+    """
+    # Primero convertir a enteros para eliminar decimales (incluyendo la columna Total)
+    tabla_int = tabla.copy()
+    for col in tabla_int.columns:
+        if tabla_int[col].dtype in ['float64', 'float32']:
+            tabla_int[col] = tabla_int[col].astype(int)
+    
+    def colorear_fila(row):
+        # No colorear la fila "Total"
+        if row.name == 'Total':
+            return [''] * len(row)
+        
+        color = _obtener_color_evaluador(row.name, base_evaluadores)
+        # Ajustar el color del texto según el fondo
+        if color == "white":
+            text_color = "black"
+        else:
+            text_color = "white"
+        
+        return [f'background-color: {color}; color: {text_color}; font-weight: bold;'] * len(row)
+    
+    # Aplicar colores a la tabla con valores enteros
+    styled_table = tabla_int.style.apply(colorear_fila, axis=1)
+    
+    return styled_table 

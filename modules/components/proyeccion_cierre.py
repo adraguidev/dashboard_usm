@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
 from typing import Dict, Any
+from modules.data.loader import cargar_base_evaluadores
 
 def mostrar_proyeccion_cierre(df: pd.DataFrame, proceso: str) -> None:
     """
@@ -82,12 +83,18 @@ def _calcular_metricas_base(df: pd.DataFrame, proceso: str) -> Dict[str, Any]:
     # Productividad individual promedio
     productividad_individual_promedio = _calcular_productividad_individual(df_copy)
     
-    # Personal activo por defecto
-    operadores_con_pendientes = df_pend_calc.groupby('OPERADOR').size()
-    operadores_con_min_pendientes = operadores_con_pendientes[operadores_con_pendientes >= 5]
-    num_operadores_activos_defecto = len(operadores_con_min_pendientes)
-    if num_operadores_activos_defecto == 0:
-        num_operadores_activos_defecto = 1
+    # Personal activo basado en la base de evaluadores
+    df_base_evaluadores = cargar_base_evaluadores(proceso)
+    if not df_base_evaluadores.empty:
+        # Usar la cantidad real de evaluadores de la base de datos
+        num_operadores_activos_defecto = len(df_base_evaluadores)
+    else:
+        # Fallback al método anterior si no hay base de evaluadores
+        operadores_con_pendientes = df_pend_calc.groupby('OPERADOR').size()
+        operadores_con_min_pendientes = operadores_con_pendientes[operadores_con_pendientes >= 5]
+        num_operadores_activos_defecto = len(operadores_con_min_pendientes)
+        if num_operadores_activos_defecto == 0:
+            num_operadores_activos_defecto = 1
     
     return {
         'pendientes_actuales_totales': pendientes_actuales_totales,
@@ -153,9 +160,14 @@ def _mostrar_configuracion_simulacion(num_operadores_activos_defecto: int) -> in
     Muestra la configuración de la simulación
     """
     st.write("### Configure la Simulación")
+    
+    # Mostrar información sobre el personal base
+    st.info(f"📋 **Personal registrado en base de datos:** {num_operadores_activos_defecto} evaluadores")
+    
     return st.number_input(
         "Cantidad de personal activo para la simulación:",
-        min_value=1, max_value=100, value=num_operadores_activos_defecto, step=1
+        min_value=1, max_value=100, value=num_operadores_activos_defecto, step=1,
+        help="Este valor está basado en la cantidad real de evaluadores registrados en la base de datos"
     )
 
 def _calcular_proyecciones(metricas: Dict[str, Any], personal_simulacion: int) -> Dict[str, Any]:

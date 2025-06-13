@@ -395,4 +395,71 @@ def actualizar_historico_pendientes(tabla_historico: pd.DataFrame) -> None:
             historico_existente.to_csv(ruta_historico, index=False)
     else:
         # Si no existe histórico, guardar directamente
-        tabla_historico.to_csv(ruta_historico, index=False) 
+        tabla_historico.to_csv(ruta_historico, index=False)
+
+@st.cache_data
+def cargar_base_evaluadores(proceso: str) -> pd.DataFrame:
+    """
+    Carga la base de evaluadores desde BASE.xlsx según el proceso
+    
+    Args:
+        proceso: Tipo de proceso ('CCM' o 'PRR')
+        
+    Returns:
+        DataFrame con la información de los evaluadores del proceso específico
+    """
+    try:
+        # Leer la pestaña específica del proceso
+        df_base = pd.read_excel("ARCHIVOS/EVALUADORES/BASE.xlsx", sheet_name=proceso)
+        # Renombrar columnas para facilitar el uso
+        df_base = df_base.rename(columns={
+            'NOMBRE EN BASE': 'OPERADOR',
+            'NOMBRES Y APELLIDOS': 'NOMBRE_COMPLETO'
+        })
+        return df_base
+    except Exception as e:
+        st.warning(f"No se pudo cargar la base de evaluadores para {proceso}: {str(e)}")
+        # Retornar DataFrame vacío con las columnas esperadas
+        return pd.DataFrame(columns=['OPERADOR', 'NOMBRE_COMPLETO', 'REGIMEN', 'TURNO', 'MODALIDAD', 'SUB-EQUIPO'])
+
+def enriquecer_pendientes_con_base(df_pendientes: pd.DataFrame, proceso: str) -> pd.DataFrame:
+    """
+    Enriquece los datos de pendientes con información de la base de evaluadores
+    
+    Args:
+        df_pendientes: DataFrame con pendientes por operador
+        proceso: Tipo de proceso ('CCM' o 'PRR')
+        
+    Returns:
+        DataFrame enriquecido con información adicional de evaluadores
+    """
+    df_base = cargar_base_evaluadores(proceso)
+    
+    if df_base.empty:
+        # Si no hay base, agregar columnas con valores por defecto
+        df_pendientes = df_pendientes.copy()
+        df_pendientes['REGIMEN'] = 'OTROS'
+        df_pendientes['TURNO'] = 'OTROS'
+        df_pendientes['MODALIDAD'] = 'OTROS'
+        df_pendientes['SUB-EQUIPO'] = 'OTROS'
+        return df_pendientes
+    
+    # Hacer merge con la base de evaluadores
+    df_enriquecido = df_pendientes.merge(
+        df_base[['OPERADOR', 'REGIMEN', 'TURNO', 'MODALIDAD', 'SUB-EQUIPO']], 
+        left_index=True, 
+        right_on='OPERADOR', 
+        how='left'
+    )
+    
+    # Llenar valores nulos con "OTROS" para operadores no encontrados en la base
+    df_enriquecido['REGIMEN'] = df_enriquecido['REGIMEN'].fillna('OTROS')
+    df_enriquecido['TURNO'] = df_enriquecido['TURNO'].fillna('OTROS')
+    df_enriquecido['MODALIDAD'] = df_enriquecido['MODALIDAD'].fillna('OTROS')
+    df_enriquecido['SUB-EQUIPO'] = df_enriquecido['SUB-EQUIPO'].fillna('OTROS')
+    
+    # Restaurar el índice como OPERADOR si se perdió
+    if 'OPERADOR' in df_enriquecido.columns and df_enriquecido.index.name != 'OPERADOR':
+        df_enriquecido = df_enriquecido.set_index('OPERADOR')
+    
+    return df_enriquecido 
