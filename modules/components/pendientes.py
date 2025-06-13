@@ -105,6 +105,17 @@ def generar_tabla_con_colores(tabla_filtrada: pd.DataFrame) -> pd.DataFrame:
     
     tabla_display = tabla_filtrada[columnas_numericas].copy()
     
+    # Asegurar que la columna Total esté presente y al final
+    if 'Total' in tabla_display.columns:
+        cols = [col for col in tabla_display.columns if col != 'Total']
+        cols.append('Total')
+        tabla_display = tabla_display[cols]
+    
+    # Convertir valores numéricos a enteros para mejor visualización
+    for col in tabla_display.columns:
+        if tabla_display[col].dtype in ['float64', 'float32']:
+            tabla_display[col] = tabla_display[col].astype(int)
+    
     return tabla_display
 
 def crear_leyenda_colores(modo_vista: str):
@@ -114,16 +125,57 @@ def crear_leyenda_colores(modo_vista: str):
     st.markdown("### 📋 Leyenda de Colores")
     
     if modo_vista == "GENERAL":
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.markdown("🟢 **RESPONSABLE** (Sub-equipo responsable)")
+            st.markdown(
+                '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+                '<div style="width: 20px; height: 20px; background-color: #4caf50; '
+                'border-radius: 3px; margin-right: 10px;"></div>'
+                '<span><strong>Verde:</strong> RESPONSABLE</span>'
+                '</div>', 
+                unsafe_allow_html=True
+            )
         
         with col2:
-            st.markdown("🟠 **REASIGNADOS** (Sub-equipo reasignados)")
+            st.markdown(
+                '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+                '<div style="width: 20px; height: 20px; background-color: #ff9800; '
+                'border-radius: 3px; margin-right: 10px;"></div>'
+                '<span><strong>Naranja:</strong> REASIGNADOS</span>'
+                '</div>', 
+                unsafe_allow_html=True
+            )
+            
+        with col3:
+            st.markdown(
+                '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+                '<div style="width: 20px; height: 20px; background-color: white; '
+                'border: 1px solid #ccc; border-radius: 3px; margin-right: 10px;"></div>'
+                '<span><strong>Blanco:</strong> OTROS ACTIVOS</span>'
+                '</div>', 
+                unsafe_allow_html=True
+            )
+            
+        with col4:
+            st.markdown(
+                '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+                '<div style="width: 20px; height: 20px; background-color: #9e9e9e; '
+                'border-radius: 3px; margin-right: 10px;"></div>'
+                '<span><strong>Gris:</strong> INACTIVOS</span>'
+                '</div>', 
+                unsafe_allow_html=True
+            )
     
     else:  # OTROS
-        st.markdown("⚪ **OTROS** (Evaluadores sin clasificar en la base de datos)")
+        st.markdown(
+            '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
+            '<div style="width: 20px; height: 20px; background-color: #9e9e9e; '
+            'border-radius: 3px; margin-right: 10px;"></div>'
+            '<span><strong>Gris:</strong> Evaluadores sin clasificar en la base</span>'
+            '</div>', 
+            unsafe_allow_html=True
+        )
 
 def mostrar_pendientes(df: pd.DataFrame, proceso: str) -> None:
     """
@@ -288,13 +340,19 @@ def mostrar_pendientes(df: pd.DataFrame, proceso: str) -> None:
     def aplicar_estilo_subequipo(row):
         """Aplica color de fondo según el sub-equipo"""
         if row.name in tabla_filtrada.index:
-            subequipo = tabla_filtrada.loc[row.name, 'SUB-EQUIPO']
+            subequipo = tabla_filtrada.loc[row.name, 'SUB-EQUIPO'] if 'SUB-EQUIPO' in tabla_filtrada.columns else 'OTROS'
             if subequipo == 'RESPONSABLE':
-                return ['background-color: #90EE90'] * len(row)  # Verde claro
+                return ['background-color: #4caf50; color: white; font-weight: bold;'] * len(row)  # Verde
             elif subequipo == 'REASIGNADOS':
-                return ['background-color: #FFB347'] * len(row)  # Naranja claro
+                return ['background-color: #ff9800; color: white; font-weight: bold;'] * len(row)  # Naranja
+            elif subequipo == 'OTROS' and row.name != 'Total':
+                # Verificar si está en la base (blanco) o no está (gris)
+                if 'SUB-EQUIPO' in tabla_filtrada.columns and not pd.isna(tabla_filtrada.loc[row.name, 'SUB-EQUIPO']):
+                    return ['background-color: white; color: black; font-weight: bold;'] * len(row)  # Blanco (activo)
+                else:
+                    return ['background-color: #9e9e9e; color: white; font-weight: bold;'] * len(row)  # Gris (inactivo)
             else:
-                return ['background-color: #F5F5F5'] * len(row)  # Gris muy claro para OTROS
+                return ['background-color: white; color: black; font-weight: bold;'] * len(row)  # Blanco por defecto
         return [''] * len(row)
     
     # Mostrar tabla con estilos

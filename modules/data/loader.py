@@ -167,7 +167,18 @@ def crear_tabla_pendientes(df_filtrado: pd.DataFrame, proceso: str, agrupacion: 
         observed=False  # Para evitar warnings de pandas
     )
     
-    # Calcular columna Total manualmente
+    # Eliminar columnas con total 0 (excepto 'Total' que se calculará después)
+    columnas_periodicas = [col for col in tabla.columns if col != 'Total']
+    columnas_con_datos = []
+    
+    for col in columnas_periodicas:
+        if tabla[col].sum() > 0:  # Solo mantener columnas que tengan al menos 1 caso
+            columnas_con_datos.append(col)
+    
+    # Mantener solo columnas con datos
+    tabla = tabla[columnas_con_datos]
+    
+    # Calcular columna Total manualmente después de filtrar columnas
     tabla['Total'] = tabla.sum(axis=1)
     
     # Aplicar filtros de operadores según el proceso (insensible a mayúsculas/minúsculas)
@@ -204,9 +215,14 @@ def crear_tabla_pendientes(df_filtrado: pd.DataFrame, proceso: str, agrupacion: 
     # Ordenar por Total descendente
     tabla = tabla.sort_values(by=('Total'), ascending=False)
     
-    # Recalcular la fila Total después de filtrar
-    total_row = tabla.sum(axis=0)
+    # Recalcular la fila Total después de filtrar (solo columnas numéricas)
+    columnas_numericas = [col for col in tabla.columns if col != 'Total']
+    total_row = tabla[columnas_numericas + ['Total']].sum(axis=0)
     total_row.name = 'Total'
+    
+    # Asegurar que el total sea correcto
+    total_row['Total'] = total_row[columnas_numericas].sum()
+    
     tabla = pd.concat([tabla, pd.DataFrame([total_row])])
     
     return tabla
