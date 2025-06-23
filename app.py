@@ -5,6 +5,8 @@ Aplicación principal de Streamlit
 
 import streamlit as st
 from modules.data.loader import cargar_datos, obtener_archivos_proceso
+from modules.config.settings import STREAMLIT_CONFIG, inicializar_configuracion
+from modules.utils.error_handler import ErrorHandler, log_user_action
 from modules.components.dashboard_ejecutivo_main import mostrar_dashboard_ejecutivo
 from modules.components.pendientes import mostrar_pendientes
 from modules.components.produccion_diaria import mostrar_produccion_diaria
@@ -16,13 +18,13 @@ def main():
     """
     Función principal de la aplicación
     """
-    # Configuración de la página
-    st.set_page_config(
-        page_title="Dashboard de Análisis de Procesos",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    # Inicializar configuración
+    if not inicializar_configuracion():
+        st.error("❌ Error en la configuración inicial. Verifica los archivos de datos.")
+        st.stop()
+    
+    # Configuración de la página usando configuración centralizada
+    st.set_page_config(**STREAMLIT_CONFIG)
     
     # Título principal
     st.title("📊 Dashboard de Análisis de Procesos")
@@ -35,8 +37,11 @@ def main():
         help="Selecciona CCM o PRR para cargar los datos correspondientes"
     )
     
-    # Cargar datos
-    try:
+    # Log de acción del usuario
+    log_user_action("Selección de proceso", {"proceso": proceso})
+    
+    # Cargar datos con manejo de errores mejorado
+    with ErrorHandler(f"Carga de datos {proceso}"):
         archivos_proceso = obtener_archivos_proceso()
         archivo = archivos_proceso[proceso]
         
@@ -45,10 +50,6 @@ def main():
         
         st.sidebar.success(f"Datos de {proceso} cargados correctamente")
         st.sidebar.info(f"Total de registros: {len(df):,}")
-        
-    except Exception as e:
-        st.error(f"Error al cargar los datos: {str(e)}")
-        st.stop()
     
     # Navegación por pestañas
     tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
